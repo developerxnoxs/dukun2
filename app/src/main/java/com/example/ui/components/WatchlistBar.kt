@@ -38,6 +38,7 @@ fun WatchlistBar(
     assets: List<MarketAsset>,
     selectedAsset: MarketAsset,
     onSelectAsset: (MarketAsset) -> Unit,
+    onOpenSearch: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyRow(
@@ -107,15 +108,19 @@ fun WatchlistBar(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(3.dp),
-                            color = if (asset.platform == ExchangePlatform.BINANCE_SPOT) {
-                                WarningGold.copy(alpha = 0.12f)
-                            } else {
-                                Ema9Cyan.copy(alpha = 0.12f)
+                            color = when (asset.platform) {
+                                ExchangePlatform.BINANCE_SPOT -> WarningGold.copy(alpha = 0.15f)
+                                ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan.copy(alpha = 0.15f)
+                                else -> BullGreen.copy(alpha = 0.15f)
                             }
                         ) {
                             Text(
-                                text = if (asset.platform == ExchangePlatform.BINANCE_SPOT) "BINANCE" else "OANDA",
-                                color = if (asset.platform == ExchangePlatform.BINANCE_SPOT) WarningGold else Ema9Cyan,
+                                text = asset.platform.badgeLabel,
+                                color = when (asset.platform) {
+                                    ExchangePlatform.BINANCE_SPOT -> WarningGold
+                                    ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan
+                                    else -> BullGreen
+                                },
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -142,6 +147,36 @@ fun WatchlistBar(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Add Symbol button at the end
+        item {
+            Surface(
+                onClick = onOpenSearch,
+                shape = RoundedCornerShape(12.dp),
+                color = SurfaceCard,
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder),
+                modifier = Modifier.testTag("add_symbol_watchlist_button")
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "+ Cari",
+                        color = Ema9Cyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Semua Pasar",
+                        color = TextMuted,
+                        fontSize = 9.sp
+                    )
                 }
             }
         }

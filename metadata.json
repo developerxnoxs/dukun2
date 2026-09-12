@@ -1,5 +1,5 @@
 {
-  "name": "Remix MarketAI",
+  "name": "MarketAI",
   "description": "Aplikasi analisis teknikal Forex \u0026 Crypto cerdas dengan chart candlestick interaktif, indikator teknikal otomatis (EMA, RSI, MACD, Bollinger Bands), notifikasi sinyal harga real-time, dan rekomendasi trading otomatis berbasis AI Gemini.",
   "requestFramePermissions": [],
   "majorCapabilities": [

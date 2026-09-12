@@ -33,12 +33,14 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -70,6 +72,7 @@ import com.example.ui.MarketViewModel
 import com.example.ui.components.AiAnalysisCard
 import com.example.ui.components.AlertsDialog
 import com.example.ui.components.InteractiveCandlestickChart
+import com.example.ui.components.SymbolSearchDialog
 import com.example.ui.components.WatchlistBar
 import com.example.ui.theme.BearRed
 import com.example.ui.theme.BullGreen
@@ -109,7 +112,8 @@ fun MainScreen(viewModel: MarketViewModel) {
     val uiState by viewModel.uiState.collectAsState()
 
     var showAlertDialog by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf("ALL") } // "ALL", "CRYPTO", "FOREX"
+    var showSearchDialog by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf("ALL") } // "ALL", "CRYPTO", "FOREX", "COMMODITY"
 
     // Request Notification permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -131,6 +135,7 @@ fun MainScreen(viewModel: MarketViewModel) {
     val filteredAssets = when (selectedCategory) {
         "CRYPTO" -> uiState.assets.filter { it.type == AssetType.CRYPTO }
         "FOREX" -> uiState.assets.filter { it.type == AssetType.FOREX }
+        "COMMODITY" -> uiState.assets.filter { it.type == AssetType.COMMODITY }
         else -> uiState.assets
     }
 
@@ -194,7 +199,7 @@ fun MainScreen(viewModel: MarketViewModel) {
                                 }
                             }
                             Text(
-                                text = "Forex & Crypto Technical Analyst",
+                                text = "Crypto, Forex & Komoditas Technical Analyst",
                                 color = TextMuted,
                                 fontSize = 10.sp
                             )
@@ -202,11 +207,27 @@ fun MainScreen(viewModel: MarketViewModel) {
                     }
                 },
                 actions = {
+                    // Search & Add Symbol Button
                     IconButton(
-                        onClick = { viewModel.loadMarketData() },
+                        onClick = { showSearchDialog = true },
+                        modifier = Modifier.testTag("top_search_button")
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = "Cari Simbol Pasar", tint = Ema9Cyan)
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.triggerImmediateRefresh() },
                         modifier = Modifier.testTag("top_refresh_button")
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary)
+                        if (uiState.isRefreshingPrice) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Ema9Cyan
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary)
+                        }
                     }
 
                     // Alerts and Signals Trigger Bell
@@ -250,18 +271,20 @@ fun MainScreen(viewModel: MarketViewModel) {
             // Category Filter Pills
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf(
-                    Pair("ALL", "Semua Pasar"),
+                    Pair("ALL", "Semua"),
                     Pair("CRYPTO", "Crypto"),
-                    Pair("FOREX", "Forex")
+                    Pair("FOREX", "Forex"),
+                    Pair("COMMODITY", "Komoditas")
                 ).forEach { (catKey, catLabel) ->
                     val isSelected = selectedCategory == catKey
                     FilterChip(
                         selected = isSelected,
                         onClick = { selectedCategory = catKey },
-                        label = { Text(catLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
+                        label = { Text(catLabel, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Ema9Cyan.copy(alpha = 0.2f),
                             selectedLabelColor = Ema9Cyan,
@@ -271,13 +294,33 @@ fun MainScreen(viewModel: MarketViewModel) {
                         modifier = Modifier.testTag("filter_chip_$catKey")
                     )
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Surface(
+                    onClick = { showSearchDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    color = Ema9Cyan.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Ema9Cyan.copy(alpha = 0.3f)),
+                    modifier = Modifier.testTag("filter_add_symbol_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Ema9Cyan, modifier = Modifier.size(14.dp))
+                        Text("+ Cari", color = Ema9Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
             // Watchlist Horizontal Scroll
             WatchlistBar(
                 assets = filteredAssets,
                 selectedAsset = uiState.selectedAsset,
-                onSelectAsset = { viewModel.selectAsset(it) }
+                onSelectAsset = { viewModel.selectAsset(it) },
+                onOpenSearch = { showSearchDialog = true }
             )
 
             // Current Asset Info & Timeframe Bar
@@ -457,6 +500,27 @@ fun MainScreen(viewModel: MarketViewModel) {
                 },
                 onDeleteAlert = { alertId ->
                     viewModel.deleteAlert(alertId)
+                }
+            )
+        }
+
+        // Global Market Symbol Search & Explore Dialog
+        if (showSearchDialog) {
+            SymbolSearchDialog(
+                searchResults = uiState.searchResults,
+                isSearching = uiState.isSearching,
+                onSearch = { query, filter ->
+                    viewModel.searchSymbols(query, filter)
+                },
+                onSelectResult = { resultItem ->
+                    viewModel.addCustomAsset(resultItem)
+                },
+                onAddDirectSymbol = { symbol, exchange, type ->
+                    viewModel.addDirectSymbol(symbol, exchange, type)
+                },
+                onDismiss = {
+                    showSearchDialog = false
+                    viewModel.clearSearchResults()
                 }
             )
         }

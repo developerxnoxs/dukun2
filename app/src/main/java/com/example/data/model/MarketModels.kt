@@ -1,7 +1,9 @@
 package com.example.data.model
 
-enum class AssetType {
-    CRYPTO, FOREX
+enum class AssetType(val label: String) {
+    CRYPTO("Crypto"),
+    FOREX("Forex"),
+    COMMODITY("Komoditas")
 }
 
 enum class ExchangePlatform(
@@ -13,14 +15,70 @@ enum class ExchangePlatform(
     BINANCE_SPOT(
         title = "TradingView (Binance Feed)",
         provider = "TradingView WebSocket via Xnoxs Engine",
-        badgeLabel = "TRADINGVIEW (BINANCE)"
+        badgeLabel = "BINANCE"
     ),
     OANDA_TRADINGVIEW(
         title = "TradingView (OANDA Feed)",
         provider = "TradingView WebSocket via Xnoxs Engine",
-        badgeLabel = "TRADINGVIEW (OANDA)"
-    )
+        badgeLabel = "OANDA"
+    ),
+    BYBIT(
+        title = "TradingView (Bybit Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "BYBIT"
+    ),
+    COINBASE(
+        title = "TradingView (Coinbase Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "COINBASE"
+    ),
+    OKX(
+        title = "TradingView (OKX Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "OKX"
+    ),
+    FXCM(
+        title = "TradingView (FXCM Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "FXCM"
+    ),
+    TVC(
+        title = "TradingView (TVC Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "TVC"
+    ),
+    OTHER(
+        title = "TradingView Live Feed",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "TRADINGVIEW"
+    );
+
+    companion object {
+        fun fromExchange(exchange: String?): ExchangePlatform {
+            val ex = exchange?.uppercase() ?: ""
+            return when {
+                ex.contains("BINANCE") -> BINANCE_SPOT
+                ex.contains("OANDA") -> OANDA_TRADINGVIEW
+                ex.contains("BYBIT") -> BYBIT
+                ex.contains("COINBASE") -> COINBASE
+                ex.contains("OKX") -> OKX
+                ex.contains("FXCM") -> FXCM
+                ex.contains("TVC") -> TVC
+                else -> OTHER
+            }
+        }
+    }
 }
+
+data class SearchResultItem(
+    val symbol: String,
+    val tvSymbol: String,
+    val displayName: String,
+    val name: String,
+    val exchange: String,
+    val type: AssetType,
+    val platform: ExchangePlatform
+)
 
 data class TradingViewRating(
     val score: Double, // -1.0 to 1.0 from Recommend.All
@@ -78,6 +136,13 @@ data class MacdPoint(
     val macd: Double,
     val signal: Double,
     val histogram: Double
+)
+
+data class LivePriceUpdate(
+    val price: Double,
+    val change24h: Double? = null,
+    val high24h: Double? = null,
+    val low24h: Double? = null
 )
 
 data class TechnicalIndicators(
