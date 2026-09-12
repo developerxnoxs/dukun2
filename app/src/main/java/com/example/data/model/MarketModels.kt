@@ -47,6 +47,51 @@ enum class ExchangePlatform(
         provider = "TradingView WebSocket via Xnoxs Engine",
         badgeLabel = "TVC"
     ),
+    KRAKEN(
+        title = "TradingView (Kraken Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "KRAKEN"
+    ),
+    KUCOIN(
+        title = "TradingView (KuCoin Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "KUCOIN"
+    ),
+    BITGET(
+        title = "TradingView (Bitget Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "BITGET"
+    ),
+    PEPPERSTONE(
+        title = "TradingView (Pepperstone Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "PEPPERSTONE"
+    ),
+    SAXO(
+        title = "TradingView (Saxo Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "SAXO"
+    ),
+    CAPITALCOM(
+        title = "TradingView (Capital.com Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "CAPITAL.COM"
+    ),
+    NASDAQ(
+        title = "TradingView (NASDAQ Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "NASDAQ"
+    ),
+    NYSE(
+        title = "TradingView (NYSE Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "NYSE"
+    ),
+    IDX(
+        title = "TradingView (BEI / IDX Feed)",
+        provider = "TradingView WebSocket via Xnoxs Engine",
+        badgeLabel = "BEI"
+    ),
     OTHER(
         title = "TradingView Live Feed",
         provider = "TradingView WebSocket via Xnoxs Engine",
@@ -64,6 +109,15 @@ enum class ExchangePlatform(
                 ex.contains("OKX") -> OKX
                 ex.contains("FXCM") -> FXCM
                 ex.contains("TVC") -> TVC
+                ex.contains("KRAKEN") -> KRAKEN
+                ex.contains("KUCOIN") -> KUCOIN
+                ex.contains("BITGET") -> BITGET
+                ex.contains("PEPPERSTONE") -> PEPPERSTONE
+                ex.contains("SAXO") -> SAXO
+                ex.contains("CAPITAL") -> CAPITALCOM
+                ex.contains("NASDAQ") -> NASDAQ
+                ex.contains("NYSE") -> NYSE
+                ex.contains("IDX") -> IDX
                 else -> OTHER
             }
         }
@@ -78,7 +132,9 @@ data class SearchResultItem(
     val exchange: String,
     val type: AssetType,
     val platform: ExchangePlatform
-)
+) {
+    val exchangeBadge: String get() = if (exchange.isNotBlank()) exchange else platform.badgeLabel
+}
 
 data class TradingViewRating(
     val score: Double, // -1.0 to 1.0 from Recommend.All
@@ -103,9 +159,13 @@ data class MarketAsset(
     val decimals: Int = 2,
     val tvRating: TradingViewRating? = null,
     val lastSyncTime: Long = System.currentTimeMillis()
-)
+) {
+    val exchangeBadge: String get() = if (tvSymbol.contains(":")) tvSymbol.substringBefore(":") else platform.badgeLabel
+}
 
 enum class Timeframe(val label: String, val interval: String, val minutes: Long) {
+    M1("1m", "1m", 1),
+    M5("5m", "5m", 5),
     M15("15m", "15m", 15),
     H1("1h", "1h", 60),
     H4("4h", "4h", 240),

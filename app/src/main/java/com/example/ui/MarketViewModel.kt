@@ -46,6 +46,7 @@ data class MarketUiState(
     val searchResults: List<com.example.data.model.SearchResultItem> = emptyList(),
     val isSearching: Boolean = false,
     val isAutoRefreshEnabled: Boolean = true,
+    val autoRefreshIntervalSeconds: Int = 5,
     val refreshCountdown: Int = 5,
     val isRefreshingPrice: Boolean = false,
     val lastRefreshedTimeMillis: Long = System.currentTimeMillis()
@@ -90,7 +91,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
     fun addCustomAsset(item: com.example.data.model.SearchResultItem) {
         val newAsset = fetcher.createMarketAssetFromSearch(item)
         _uiState.update { state ->
-            val existing = state.assets.firstOrNull { it.tvSymbol == newAsset.tvSymbol || it.symbol == newAsset.symbol }
+            val existing = state.assets.firstOrNull { it.tvSymbol == newAsset.tvSymbol }
             if (existing != null) {
                 state.copy(selectedAsset = existing, aiAnalysisResult = null, latestChartBitmap = null)
             } else {
@@ -147,7 +148,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectAsset(asset: MarketAsset) {
-        if (_uiState.value.selectedAsset.symbol == asset.symbol) return
+        if (_uiState.value.selectedAsset.tvSymbol == asset.tvSymbol) return
         _uiState.update { it.copy(selectedAsset = asset, aiAnalysisResult = null, latestChartBitmap = null) }
         loadMarketData()
     }
@@ -174,7 +175,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
 
                 _uiState.update { state ->
                     val updatedAssets = state.assets.map {
-                        if (it.symbol == asset.symbol) updatedAsset else it
+                        if (it.tvSymbol == asset.tvSymbol) updatedAsset else it
                     }
                     state.copy(
                         assets = updatedAssets,
@@ -212,7 +213,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                             val r = ratings[asset.tvSymbol]
                             if (r != null) asset.copy(tvRating = r) else asset
                         }
-                        val selected = updated.firstOrNull { it.symbol == state.selectedAsset.symbol } ?: state.selectedAsset
+                        val selected = updated.firstOrNull { it.tvSymbol == state.selectedAsset.tvSymbol } ?: state.selectedAsset
                         state.copy(assets = updated, selectedAsset = selected)
                     }
                 }
@@ -328,105 +329,174 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var isRefreshingInProgress = false
+    private var refreshCycleCounter = 0
+
     fun toggleAutoRefresh() {
         val newState = !_uiState.value.isAutoRefreshEnabled
-        _uiState.update { it.copy(isAutoRefreshEnabled = newState) }
+        _uiState.update { 
+            it.copy(
+                isAutoRefreshEnabled = newState,
+                refreshCountdown = if (newState) it.autoRefreshIntervalSeconds else it.refreshCountdown
+            ) 
+        }
+    }
+
+    fun setAutoRefreshInterval(seconds: Int) {
+        val validSec = seconds.coerceIn(3, 60)
+        _uiState.update { 
+            it.copy(
+                autoRefreshIntervalSeconds = validSec,
+                refreshCountdown = validSec
+            ) 
+        }
     }
 
     fun triggerImmediateRefresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(refreshCountdown = 5, isRefreshingPrice = true) }
-            performRealPriceRefresh()
+            _uiState.update { 
+                it.copy(
+                    refreshCountdown = it.autoRefreshIntervalSeconds,
+                    isRefreshingPrice = true
+                ) 
+            }
+            performAutoRefresh(fullCandleSync = true)
         }
     }
 
-    private suspend fun performRealPriceRefresh() {
-        val state = _uiState.value
-        val asset = state.selectedAsset
-        val candles = state.candles
+    private suspend fun performAutoRefresh(fullCandleSync: Boolean = false) {
+        if (isRefreshingInProgress) return
+        isRefreshingInProgress = true
+        _uiState.update { it.copy(isRefreshingPrice = true) }
 
         try {
+            val state = _uiState.value
+            val asset = state.selectedAsset
+            val tf = state.selectedTimeframe
+            val currentCandles = state.candles
+
+            // If initial candles are missing or periodic full sync is needed, fetch fresh candles in background
+            if (currentCandles.isEmpty() || fullCandleSync || refreshCycleCounter % 4 == 0) {
+                try {
+                    val freshCandles = fetcher.fetchCandles(asset, tf, limit = 85)
+                    if (freshCandles.isNotEmpty()) {
+                        val indicators = IndicatorCalculator.calculateAllIndicators(freshCandles)
+                        val lastClose = freshCandles.last().close
+                        val updatedAsset = asset.copy(
+                            currentPrice = lastClose,
+                            lastSyncTime = System.currentTimeMillis()
+                        )
+                        _uiState.update { s ->
+                            val updatedAssets = s.assets.map { if (it.tvSymbol == asset.tvSymbol) updatedAsset else it }
+                            s.copy(
+                                candles = freshCandles,
+                                indicators = indicators,
+                                selectedAsset = updatedAsset,
+                                assets = updatedAssets,
+                                isLiveFeedActive = true,
+                                errorMessage = null
+                            )
+                        }
+                        checkAlerts(lastClose, indicators)
+                    }
+                } catch (e: Exception) {
+                    println("[AutoRefresh] Silent candle fetch error: ${e.message}")
+                }
+            }
+
+            // Always update real-time price & 24h stats
             val priceUpdate = fetcher.fetchLiveRealPriceDetails(asset)
             val realPrice = priceUpdate.price
 
-            if (candles.isNotEmpty() && realPrice > 0.0) {
-                val last = candles.last()
-                val updatedCandle = last.copy(
-                    close = realPrice,
-                    high = max(last.high, realPrice),
-                    low = min(last.low, realPrice)
-                )
-
-                val updatedCandles = candles.dropLast(1) + updatedCandle
-                val updatedAsset = asset.copy(
-                    currentPrice = realPrice,
-                    change24h = priceUpdate.change24h ?: asset.change24h,
-                    high24h = priceUpdate.high24h ?: max(asset.high24h, realPrice),
-                    low24h = priceUpdate.low24h ?: min(asset.low24h, realPrice),
-                    lastSyncTime = System.currentTimeMillis()
-                )
-                val updatedIndicators = IndicatorCalculator.calculateAllIndicators(updatedCandles)
-
+            if (realPrice > 0.0) {
                 _uiState.update { s ->
+                    val nowCandles = s.candles
+                    val updatedCandles = if (nowCandles.isNotEmpty()) {
+                        val last = nowCandles.last()
+                        val updatedCandle = last.copy(
+                            close = realPrice,
+                            high = max(last.high, realPrice),
+                            low = min(last.low, realPrice)
+                        )
+                        nowCandles.dropLast(1) + updatedCandle
+                    } else nowCandles
+
+                    val updatedAsset = s.selectedAsset.copy(
+                        currentPrice = realPrice,
+                        change24h = priceUpdate.change24h ?: s.selectedAsset.change24h,
+                        high24h = priceUpdate.high24h ?: max(s.selectedAsset.high24h, realPrice),
+                        low24h = priceUpdate.low24h ?: min(s.selectedAsset.low24h, realPrice),
+                        lastSyncTime = System.currentTimeMillis()
+                    )
+
+                    val newIndicators = if (updatedCandles.isNotEmpty()) {
+                        IndicatorCalculator.calculateAllIndicators(updatedCandles)
+                    } else s.indicators
+
+                    val updatedAssets = s.assets.map { if (it.tvSymbol == asset.tvSymbol) updatedAsset else it }
+
                     s.copy(
                         candles = updatedCandles,
                         selectedAsset = updatedAsset,
-                        indicators = updatedIndicators,
+                        assets = updatedAssets,
+                        indicators = newIndicators,
                         isLiveFeedActive = true,
-                        isRefreshingPrice = false,
-                        lastRefreshedTimeMillis = System.currentTimeMillis(),
-                        assets = s.assets.map { if (it.symbol == asset.symbol) updatedAsset else it }
+                        errorMessage = null,
+                        lastRefreshedTimeMillis = System.currentTimeMillis()
                     )
                 }
+                checkAlerts(realPrice, _uiState.value.indicators)
+            }
 
-                checkAlerts(realPrice, updatedIndicators)
-            } else {
-                _uiState.update { it.copy(isRefreshingPrice = false) }
+            // Periodically refresh ratings from TradingView scanner
+            if (refreshCycleCounter % 3 == 0) {
+                try {
+                    val ratings = fetcher.fetchTradingViewScanner(_uiState.value.assets)
+                    if (ratings.isNotEmpty()) {
+                        _uiState.update { s ->
+                            val updatedList = s.assets.map { a ->
+                                val r = ratings[a.tvSymbol]
+                                if (r != null) a.copy(tvRating = r) else a
+                            }
+                            val curSelected = updatedList.firstOrNull { it.tvSymbol == s.selectedAsset.tvSymbol } ?: s.selectedAsset
+                            s.copy(assets = updatedList, selectedAsset = curSelected)
+                        }
+                    }
+                } catch (_: Exception) {}
             }
         } catch (e: Exception) {
-            _uiState.update { it.copy(isRefreshingPrice = false) }
+            println("[AutoRefresh] error: ${e.message}")
+        } finally {
+            _uiState.update { 
+                it.copy(
+                    isRefreshingPrice = false,
+                    lastRefreshedTimeMillis = System.currentTimeMillis()
+                ) 
+            }
+            isRefreshingInProgress = false
         }
     }
 
     private fun startRealPriceTicker() {
         priceTickerJob?.cancel()
         priceTickerJob = viewModelScope.launch {
-            var countdown = 5
-            var cycleCount = 0
             while (isActive) {
-                delay(1000) // 1-second interval clock for accurate 5s countdown
-                if (!_uiState.value.isAutoRefreshEnabled) {
+                delay(1000)
+                val state = _uiState.value
+                if (!state.isAutoRefreshEnabled) {
                     continue
                 }
 
-                countdown--
-                if (countdown > 0) {
-                    _uiState.update { it.copy(refreshCountdown = countdown) }
-                    continue
-                }
-
-                // Exactly every 5 seconds, poll genuine real price
-                countdown = 5
-                cycleCount++
-                _uiState.update { it.copy(refreshCountdown = countdown, isRefreshingPrice = true) }
-
-                performRealPriceRefresh()
-
-                // Every 15 seconds (every 3 cycles of 5s), refresh TradingView scanner ratings
-                if (cycleCount % 3 == 0) {
-                    try {
-                        val ratings = fetcher.fetchTradingViewScanner(_uiState.value.assets)
-                        if (ratings.isNotEmpty()) {
-                            _uiState.update { s ->
-                                val updatedList = s.assets.map { a ->
-                                    val r = ratings[a.tvSymbol]
-                                    if (r != null) a.copy(tvRating = r) else a
-                                }
-                                val curSelected = updatedList.firstOrNull { it.symbol == s.selectedAsset.symbol } ?: s.selectedAsset
-                                s.copy(assets = updatedList, selectedAsset = curSelected)
-                            }
-                        }
-                    } catch (_: Exception) {}
+                val currentCountdown = state.refreshCountdown
+                if (currentCountdown > 1) {
+                    _uiState.update { it.copy(refreshCountdown = currentCountdown - 1) }
+                } else {
+                    val interval = state.autoRefreshIntervalSeconds
+                    _uiState.update { it.copy(refreshCountdown = interval) }
+                    refreshCycleCounter++
+                    launch {
+                        performAutoRefresh(fullCandleSync = (refreshCycleCounter % 4 == 0))
+                    }
                 }
             }
         }

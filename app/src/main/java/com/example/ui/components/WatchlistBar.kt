@@ -41,14 +41,15 @@ fun WatchlistBar(
     onOpenSearch: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val uniqueAssets = androidx.compose.runtime.remember(assets) { assets.distinctBy { it.tvSymbol } }
     LazyRow(
         modifier = modifier
             .fillMaxWidth()
             .testTag("watchlist_bar"),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(assets, key = { it.symbol }) { asset ->
-            val isSelected = asset.symbol == selectedAsset.symbol
+        items(uniqueAssets, key = { it.tvSymbol }) { asset ->
+            val isSelected = asset.tvSymbol == selectedAsset.tvSymbol
             val isBull = asset.change24h >= 0
 
             Surface(
@@ -59,7 +60,7 @@ fun WatchlistBar(
                     width = if (isSelected) 1.5.dp else 1.dp,
                     color = if (isSelected) Ema9Cyan else SurfaceCardBorder
                 ),
-                modifier = Modifier.testTag("asset_item_${asset.symbol}")
+                modifier = Modifier.testTag("asset_item_${asset.tvSymbol.replace(':', '_')}")
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
@@ -111,14 +112,20 @@ fun WatchlistBar(
                             color = when (asset.platform) {
                                 ExchangePlatform.BINANCE_SPOT -> WarningGold.copy(alpha = 0.15f)
                                 ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan.copy(alpha = 0.15f)
+                                ExchangePlatform.BYBIT -> WarningGold.copy(alpha = 0.2f)
+                                ExchangePlatform.OKX -> Ema9Cyan.copy(alpha = 0.2f)
+                                ExchangePlatform.FXCM -> Ema9Cyan.copy(alpha = 0.15f)
                                 else -> BullGreen.copy(alpha = 0.15f)
                             }
                         ) {
                             Text(
-                                text = asset.platform.badgeLabel,
+                                text = asset.exchangeBadge,
                                 color = when (asset.platform) {
                                     ExchangePlatform.BINANCE_SPOT -> WarningGold
                                     ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan
+                                    ExchangePlatform.BYBIT -> WarningGold
+                                    ExchangePlatform.OKX -> Ema9Cyan
+                                    ExchangePlatform.FXCM -> Ema9Cyan
                                     else -> BullGreen
                                 },
                                 fontSize = 8.sp,

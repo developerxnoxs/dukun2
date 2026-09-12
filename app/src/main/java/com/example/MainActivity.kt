@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +33,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShowChart
@@ -336,7 +339,7 @@ fun MainScreen(viewModel: MarketViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = uiState.selectedAsset.displayName,
@@ -365,8 +368,13 @@ fun MainScreen(viewModel: MarketViewModel) {
                             )
                         }
 
-                        // Timeframe Pills
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // Timeframe Pills (1m, 5m, 15m, 1h, 4h, 1D)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Timeframe.entries.forEach { tf ->
                                 val isSelected = uiState.selectedTimeframe == tf
                                 Surface(
@@ -463,6 +471,124 @@ fun MainScreen(viewModel: MarketViewModel) {
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Hubungkan Ulang", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // Live Feed & Auto-Refresh Status Bar
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("auto_refresh_status_bar"),
+                shape = RoundedCornerShape(12.dp),
+                color = SurfaceDark,
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left: Live status dot & Countdown
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Pulsing Live Indicator
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    color = if (uiState.isAutoRefreshEnabled) BullGreen else TextMuted,
+                                    shape = CircleShape
+                                )
+                        )
+                        Text(
+                            text = if (uiState.isAutoRefreshEnabled) {
+                                if (uiState.isRefreshingPrice) "Memperbarui..." else "Auto Refresh: ${uiState.refreshCountdown}s"
+                            } else {
+                                "Auto Refresh: Dijeda"
+                            },
+                            color = if (uiState.isAutoRefreshEnabled) TextPrimary else TextMuted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        // Last updated time
+                        val timeStr = remember(uiState.lastRefreshedTimeMillis) {
+                            java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date(uiState.lastRefreshedTimeMillis))
+                        }
+                        Text(
+                            text = "($timeStr)",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    // Right: Controls (Interval options, Pause/Resume, Instant Refresh)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Interval pills: 5s, 10s, 30s
+                        listOf(5, 10, 30).forEach { sec ->
+                            val isSel = uiState.autoRefreshIntervalSeconds == sec
+                            Surface(
+                                onClick = { viewModel.setAutoRefreshInterval(sec) },
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSel) Ema9Cyan.copy(alpha = 0.2f) else SurfaceCard,
+                                border = if (isSel) androidx.compose.foundation.BorderStroke(1.dp, Ema9Cyan) else null,
+                                modifier = Modifier.testTag("interval_${sec}s")
+                            ) {
+                                Text(
+                                    text = "${sec}s",
+                                    color = if (isSel) Ema9Cyan else TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        // Play/Pause button
+                        IconButton(
+                            onClick = { viewModel.toggleAutoRefresh() },
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("toggle_auto_refresh_button")
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.isAutoRefreshEnabled) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (uiState.isAutoRefreshEnabled) "Jeda Auto Refresh" else "Lanjutkan Auto Refresh",
+                                tint = if (uiState.isAutoRefreshEnabled) WarningGold else BullGreen,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        // Manual Refresh Button
+                        IconButton(
+                            onClick = { viewModel.triggerImmediateRefresh() },
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("instant_refresh_button")
+                        ) {
+                            if (uiState.isRefreshingPrice) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Ema9Cyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh Sekarang",
+                                    tint = Ema9Cyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }

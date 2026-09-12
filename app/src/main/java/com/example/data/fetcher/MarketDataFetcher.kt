@@ -46,6 +46,20 @@ class MarketDataFetcher {
                 decimals = 2
             ),
             MarketAsset(
+                symbol = "BTCUSDT",
+                tvSymbol = "BYBIT:BTCUSDT",
+                displayName = "BTC/USDT",
+                name = "Bitcoin Bybit",
+                type = AssetType.CRYPTO,
+                platform = ExchangePlatform.BYBIT,
+                currentPrice = 77160.0,
+                change24h = 0.95,
+                high24h = 79910.0,
+                low24h = 76050.0,
+                volume24h = 14200.0,
+                decimals = 2
+            ),
+            MarketAsset(
                 symbol = "ETHUSDT",
                 tvSymbol = "BINANCE:ETHUSDT",
                 displayName = "ETH/USDT",
@@ -57,6 +71,20 @@ class MarketDataFetcher {
                 high24h = 2665.0,
                 low24h = 2433.0,
                 volume24h = 611000.0,
+                decimals = 2
+            ),
+            MarketAsset(
+                symbol = "ETHUSDT",
+                tvSymbol = "OKX:ETHUSDT",
+                displayName = "ETH/USDT",
+                name = "Ethereum OKX",
+                type = AssetType.CRYPTO,
+                platform = ExchangePlatform.OKX,
+                currentPrice = 2531.5,
+                change24h = 3.82,
+                high24h = 2668.0,
+                low24h = 2434.0,
+                volume24h = 380000.0,
                 decimals = 2
             ),
             MarketAsset(
@@ -260,6 +288,20 @@ class MarketDataFetcher {
                 decimals = 4
             ),
             MarketAsset(
+                symbol = "EURUSD=X",
+                tvSymbol = "FXCM:EURUSD",
+                displayName = "EUR/USD",
+                name = "Euro / US Dollar FXCM",
+                type = AssetType.FOREX,
+                platform = ExchangePlatform.FXCM,
+                currentPrice = 1.1599,
+                change24h = -0.09,
+                high24h = 1.1618,
+                low24h = 1.1569,
+                volume24h = 98000.0,
+                decimals = 4
+            ),
+            MarketAsset(
                 symbol = "GBPUSD=X",
                 tvSymbol = "OANDA:GBPUSD",
                 displayName = "GBP/USD",
@@ -415,6 +457,8 @@ class MarketDataFetcher {
 
     private fun fetchCryptoCandlesFromBinance(symbol: String, timeframe: Timeframe, limit: Int): List<CandleStick> {
         val binanceInterval = when (timeframe) {
+            Timeframe.M1 -> "1m"
+            Timeframe.M5 -> "5m"
             Timeframe.M15 -> "15m"
             Timeframe.H1 -> "1h"
             Timeframe.H4 -> "4h"
@@ -467,6 +511,8 @@ class MarketDataFetcher {
     private fun fetchForexCandlesFromYahoo(symbol: String, timeframe: Timeframe, limit: Int): List<CandleStick> {
         val mappedSymbol = mapSymbolToYahoo(symbol)
         val (interval, range) = when (timeframe) {
+            Timeframe.M1 -> Pair("1m", "1d")
+            Timeframe.M5 -> Pair("5m", "5d")
             Timeframe.M15 -> Pair("15m", "5d")
             Timeframe.H1 -> Pair("1h", "1mo")
             Timeframe.H4 -> Pair("1h", "3mo")

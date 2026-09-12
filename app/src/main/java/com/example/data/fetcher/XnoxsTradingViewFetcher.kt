@@ -65,9 +65,20 @@ class XnoxsTradingViewFetcher(
         val low: Double? = null
     )
 
+    data class ResolvedPlatformInfo(
+        val symbol: String,
+        val exchange: String,
+        val listedExchange: String,
+        val fullTvSymbol: String,
+        val description: String,
+        val type: String,
+        val currency: String
+    )
+
     data class FetchResult(
         val candles: List<CandleStick>,
-        val latestQuote: QuoteData?
+        val latestQuote: QuoteData?,
+        val resolvedPlatform: ResolvedPlatformInfo? = null
     )
 
     /**
@@ -75,6 +86,8 @@ class XnoxsTradingViewFetcher(
      */
     fun mapTimeframeToTv(timeframe: Timeframe): String {
         return when (timeframe) {
+            Timeframe.M1 -> "1"
+            Timeframe.M5 -> "5"
             Timeframe.M15 -> "15"
             Timeframe.H1 -> "1H"
             Timeframe.H4 -> "4H"
@@ -139,6 +152,7 @@ class XnoxsTradingViewFetcher(
 
         val candleMap = java.util.concurrent.ConcurrentSkipListMap<Long, CandleStick>()
         var latestQuote: QuoteData? = null
+        var resolvedPlatform: ResolvedPlatformInfo? = null
 
         val request = Request.Builder()
             .url(TV_WS_ENDPOINT)
@@ -280,12 +294,40 @@ class XnoxsTradingViewFetcher(
                     }
                 }
 
+                // Parse symbol_resolved: returns real platform, exchange, description, and currency
+                if (text.contains("symbol_resolved")) {
+                    try {
+                        val objIdx = text.indexOf("{\"name\":")
+                        if (objIdx != -1) {
+                            val sub = text.substring(objIdx)
+                            val endIdx = sub.indexOf("}]}")
+                            val jsonStr = if (endIdx != -1) sub.substring(0, endIdx + 1) else sub
+                            val obj = JSONObject(jsonStr)
+                            val exName = obj.optString("exchange")
+                            val listedEx = obj.optString("listed_exchange", exName)
+                            val symName = obj.optString("name")
+                            val desc = obj.optString("description", symName)
+                            val type = obj.optString("type")
+                            val curr = obj.optString("currency_code")
+                            resolvedPlatform = ResolvedPlatformInfo(
+                                symbol = symName,
+                                exchange = exName,
+                                listedExchange = listedEx,
+                                fullTvSymbol = if (exName.isNotBlank()) "$exName:$symName" else symName,
+                                description = desc,
+                                type = type,
+                                currency = curr
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 // When series is completed or we have collected bars
                 if (text.contains("series_completed")) {
                     val candles = candleMap.values.toList()
                     println("[XnoxsFetcher] series_completed. Total candles: ${candles.size}")
                     if (candles.isNotEmpty()) {
-                        deferredResult.complete(FetchResult(candles, latestQuote))
+                        deferredResult.complete(FetchResult(candles, latestQuote, resolvedPlatform))
                     }
                 }
             }
@@ -294,7 +336,7 @@ class XnoxsTradingViewFetcher(
                 println("[XnoxsFetcher] WebSocket failure: ${t.message}, response code: ${response?.code}")
                 if (!deferredResult.isCompleted) {
                     if (candleMap.isNotEmpty()) {
-                        deferredResult.complete(FetchResult(candleMap.values.toList(), latestQuote))
+                        deferredResult.complete(FetchResult(candleMap.values.toList(), latestQuote, resolvedPlatform))
                     } else {
                         deferredResult.completeExceptionally(
                             IOException("Koneksi TradingView gagal (code: ${response?.code}): ${t.localizedMessage ?: t.message}", t)
@@ -307,7 +349,7 @@ class XnoxsTradingViewFetcher(
                 if (!deferredResult.isCompleted) {
                     val candles = candleMap.values.toList()
                     if (candles.isNotEmpty()) {
-                        deferredResult.complete(FetchResult(candles, latestQuote))
+                        deferredResult.complete(FetchResult(candles, latestQuote, resolvedPlatform))
                     }
                 }
             }
@@ -330,9 +372,79 @@ class XnoxsTradingViewFetcher(
 
         // If deferred didn't complete but we got candles in the map
         if (candleMap.isNotEmpty()) {
-            return@withContext FetchResult(candleMap.values.toList(), latestQuote)
+            return@withContext FetchResult(candleMap.values.toList(), latestQuote, resolvedPlatform)
         }
 
         throw IOException("Timeout mengambil data lilin TradingView untuk $formattedSymbol ($interval)")
+    }
+
+    /**
+     * Mengetahui platform/bursa penyedia dari simbol tertentu secara dinamis.
+     * Mengakses TradingView Symbol Search engine untuk menemukan bursa (Binance, Bybit, OKX, Oanda, FXCM, Nasdaq, dll.).
+     */
+    suspend fun searchPlatformsForSymbol(query: String): List<ResolvedPlatformInfo> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        val encodedQuery = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val url = "https://symbol-search.tradingview.com/symbol_search/?text=$encodedQuery&lang=en"
+        val request = Request.Builder()
+            .url(url)
+            .header("Origin", TV_ORIGIN)
+            .header("Referer", "$TV_ORIGIN/")
+            .header("User-Agent", TV_USER_AGENT)
+            .header("Accept", "application/json")
+            .build()
+
+        try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext emptyList()
+            val body = response.body?.string() ?: return@withContext emptyList()
+            val array = JSONArray(body)
+            val list = mutableListOf<ResolvedPlatformInfo>()
+            for (i in 0 until kotlin.math.min(array.length(), 25)) {
+                val obj = array.getJSONObject(i)
+                val rawSymbol = obj.optString("symbol")
+                val exchange = obj.optString("prefix", obj.optString("exchange")).uppercase()
+                val desc = obj.optString("description", rawSymbol)
+                val type = obj.optString("type", "unknown")
+                val currency = obj.optString("currency_code", "")
+                list.add(
+                    ResolvedPlatformInfo(
+                        symbol = rawSymbol,
+                        exchange = exchange,
+                        listedExchange = obj.optString("listed_exchange", exchange),
+                        fullTvSymbol = if (exchange.isNotBlank()) "$exchange:$rawSymbol" else rawSymbol,
+                        description = desc,
+                        type = type,
+                        currency = currency
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Resolusi otomatis untuk mengetahui platform/bursa default dari suatu simbol
+     * (misalnya jika pengguna hanya memasukkan "BTCUSDT" atau "EURUSD" tanpa prefiks bursa).
+     */
+    suspend fun resolveSymbolPlatform(symbol: String): ResolvedPlatformInfo? = withContext(Dispatchers.IO) {
+        val clean = symbol.trim().uppercase()
+        if (clean.contains(":")) {
+            val ex = clean.substringBefore(":")
+            val sym = clean.substringAfter(":")
+            return@withContext ResolvedPlatformInfo(
+                symbol = sym,
+                exchange = ex,
+                listedExchange = ex,
+                fullTvSymbol = clean,
+                description = sym,
+                type = "market",
+                currency = ""
+            )
+        }
+        val matches = searchPlatformsForSymbol(clean)
+        matches.firstOrNull { it.symbol.equals(clean, ignoreCase = true) } ?: matches.firstOrNull()
     }
 }

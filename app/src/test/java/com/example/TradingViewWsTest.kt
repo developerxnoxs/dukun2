@@ -44,5 +44,17 @@ class TradingViewWsTest {
         println("[TEST XNOXS] Last Gold candle: close=${last.close}")
         assertTrue("Gold price should be > 1000", last.close > 1000.0)
     }
+
+    @Test
+    fun test1MinuteAnd5MinuteTimeframes() = runBlocking {
+        println("[TEST 1M & 5M] Testing M1 and M5 timeframes...")
+        val m1Result = fetcher.getHistoricalData("BINANCE:BTCUSDT", Timeframe.M1, barsCount = 10)
+        println("[TEST 1M] Candles: ${m1Result.candles.size}")
+        assertFalse("M1 candles should not be empty", m1Result.candles.isEmpty())
+
+        val m5Result = fetcher.getHistoricalData("BINANCE:ETHUSDT", Timeframe.M5, barsCount = 10)
+        println("[TEST 5M] Candles: ${m5Result.candles.size}")
+        assertFalse("M5 candles should not be empty", m5Result.candles.isEmpty())
+    }
 }
 

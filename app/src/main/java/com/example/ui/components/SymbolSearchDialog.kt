@@ -340,14 +340,20 @@ fun SymbolSearchDialog(
                                             color = when (item.platform) {
                                                 ExchangePlatform.BINANCE_SPOT -> WarningGold.copy(alpha = 0.15f)
                                                 ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan.copy(alpha = 0.15f)
+                                                ExchangePlatform.BYBIT -> WarningGold.copy(alpha = 0.2f)
+                                                ExchangePlatform.OKX -> Ema9Cyan.copy(alpha = 0.2f)
+                                                ExchangePlatform.FXCM -> Ema9Cyan.copy(alpha = 0.15f)
                                                 else -> BullGreen.copy(alpha = 0.15f)
                                             }
                                         ) {
                                             Text(
-                                                text = item.platform.badgeLabel,
+                                                text = item.exchangeBadge,
                                                 color = when (item.platform) {
                                                     ExchangePlatform.BINANCE_SPOT -> WarningGold
                                                     ExchangePlatform.OANDA_TRADINGVIEW -> Ema9Cyan
+                                                    ExchangePlatform.BYBIT -> WarningGold
+                                                    ExchangePlatform.OKX -> Ema9Cyan
+                                                    ExchangePlatform.FXCM -> Ema9Cyan
                                                     else -> BullGreen
                                                 },
                                                 fontSize = 9.sp,

@@ -138,7 +138,7 @@ fun InteractiveCandlestickChart(
                         .background(BullGreen, androidx.compose.foundation.shape.CircleShape)
                 )
                 Text(
-                    text = "PLATFORM: ${asset.platform.badgeLabel}",
+                    text = "PLATFORM: ${asset.exchangeBadge}",
                     color = BullGreen,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
