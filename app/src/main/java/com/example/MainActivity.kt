@@ -63,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -326,37 +327,61 @@ fun MainScreen(viewModel: MarketViewModel) {
                 onOpenSearch = { showSearchDialog = true }
             )
 
-            // Current Asset Info & Timeframe Bar
+            // Current Asset Info Card (Clean & Spacious Symbol Display)
+            val isBull = uiState.selectedAsset.change24h >= 0
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("asset_info_card"),
                 shape = RoundedCornerShape(14.dp),
                 color = SurfaceDark,
                 border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Top Row: Symbol Name & Badges (Left) | Price & 24h % (Right)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Left: Symbol and tags
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 Text(
                                     text = uiState.selectedAsset.displayName,
                                     color = TextPrimary,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Black
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = Ema9Cyan.copy(alpha = 0.15f)
+                                    color = Ema9Cyan.copy(alpha = 0.15f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Ema9Cyan.copy(alpha = 0.3f))
                                 ) {
                                     Text(
                                         text = uiState.selectedAsset.platform.badgeLabel,
                                         color = Ema9Cyan,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = SurfaceCard,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                                ) {
+                                    Text(
+                                        text = uiState.selectedAsset.type.name,
+                                        color = TextSecondary,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                     )
                                 }
@@ -364,74 +389,119 @@ fun MainScreen(viewModel: MarketViewModel) {
                             Text(
                                 text = "${uiState.selectedAsset.name} • ${uiState.selectedAsset.tvSymbol}",
                                 color = TextMuted,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                maxLines = 1
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        // Timeframe Pills (1m, 5m, 15m, 1h, 4h, 1D)
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Timeframe.entries.forEach { tf ->
-                                val isSelected = uiState.selectedTimeframe == tf
-                                Surface(
-                                    onClick = { viewModel.selectTimeframe(tf) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) Ema9Cyan else SurfaceCard,
-                                    modifier = Modifier.testTag("timeframe_${tf.label}")
-                                ) {
-                                    Text(
-                                        text = tf.label,
-                                        color = if (isSelected) TerminalBg else TextSecondary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
+                        // Right: Live Price & 24h Change Pill
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = String.format(Locale.US, "%,.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.currentPrice),
+                                color = TextPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isBull) BullGreen.copy(alpha = 0.15f) else BearRed.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isBull) BullGreen.copy(alpha = 0.35f) else BearRed.copy(alpha = 0.35f)
+                                )
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "%+.2f%%", uiState.selectedAsset.change24h),
+                                    color = if (isBull) BullGreen else BearRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Price & 24h Stats Row
-                    val isBull = uiState.selectedAsset.change24h >= 0
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
+                    // Bottom Row: 24h High & Low Range Stats
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = String.format(Locale.US, "%.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.currentPrice),
-                                color = TextPrimary,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = String.format(Locale.US, "%+.2f%%", uiState.selectedAsset.change24h),
-                                color = if (isBull) BullGreen else BearRed,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(text = "24h High", color = TextMuted, fontSize = 11.sp)
+                                Text(
+                                    text = String.format(Locale.US, "%,.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.high24h),
+                                    color = BullGreen,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(text = "24h Low", color = TextMuted, fontSize = 11.sp)
+                                Text(
+                                    text = String.format(Locale.US, "%,.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.low24h),
+                                    color = BearRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
+                    }
+                }
+            }
 
-                        // High / Low Stats
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "24h H: ${String.format(Locale.US, "%.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.high24h)}",
-                                color = TextMuted,
-                                fontSize = 10.sp
-                            )
-                            Text(
-                                text = "24h L: ${String.format(Locale.US, "%.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.low24h)}",
-                                color = TextMuted,
-                                fontSize = 10.sp
-                            )
+            // Dedicated Timeframe Segmented Control (Rapi, Seimbang & Presisi)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("timeframe_selector_bar"),
+                shape = RoundedCornerShape(12.dp),
+                color = SurfaceDark,
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Timeframe.entries.forEach { tf ->
+                        val isSelected = uiState.selectedTimeframe == tf
+                        Surface(
+                            onClick = { viewModel.selectTimeframe(tf) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) Ema9Cyan else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("timeframe_${tf.label}")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = tf.label,
+                                    color = if (isSelected) TerminalBg else TextSecondary,
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -471,124 +541,6 @@ fun MainScreen(viewModel: MarketViewModel) {
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Hubungkan Ulang", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            // Live Feed & Auto-Refresh Status Bar
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("auto_refresh_status_bar"),
-                shape = RoundedCornerShape(12.dp),
-                color = SurfaceDark,
-                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left: Live status dot & Countdown
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Pulsing Live Indicator
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    color = if (uiState.isAutoRefreshEnabled) BullGreen else TextMuted,
-                                    shape = CircleShape
-                                )
-                        )
-                        Text(
-                            text = if (uiState.isAutoRefreshEnabled) {
-                                if (uiState.isRefreshingPrice) "Memperbarui..." else "Auto Refresh: ${uiState.refreshCountdown}s"
-                            } else {
-                                "Auto Refresh: Dijeda"
-                            },
-                            color = if (uiState.isAutoRefreshEnabled) TextPrimary else TextMuted,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        // Last updated time
-                        val timeStr = remember(uiState.lastRefreshedTimeMillis) {
-                            java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date(uiState.lastRefreshedTimeMillis))
-                        }
-                        Text(
-                            text = "($timeStr)",
-                            color = TextMuted,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    // Right: Controls (Interval options, Pause/Resume, Instant Refresh)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Interval pills: 5s, 10s, 30s
-                        listOf(5, 10, 30).forEach { sec ->
-                            val isSel = uiState.autoRefreshIntervalSeconds == sec
-                            Surface(
-                                onClick = { viewModel.setAutoRefreshInterval(sec) },
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isSel) Ema9Cyan.copy(alpha = 0.2f) else SurfaceCard,
-                                border = if (isSel) androidx.compose.foundation.BorderStroke(1.dp, Ema9Cyan) else null,
-                                modifier = Modifier.testTag("interval_${sec}s")
-                            ) {
-                                Text(
-                                    text = "${sec}s",
-                                    color = if (isSel) Ema9Cyan else TextSecondary,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                )
-                            }
-                        }
-
-                        // Play/Pause button
-                        IconButton(
-                            onClick = { viewModel.toggleAutoRefresh() },
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("toggle_auto_refresh_button")
-                        ) {
-                            Icon(
-                                imageVector = if (uiState.isAutoRefreshEnabled) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (uiState.isAutoRefreshEnabled) "Jeda Auto Refresh" else "Lanjutkan Auto Refresh",
-                                tint = if (uiState.isAutoRefreshEnabled) WarningGold else BullGreen,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-
-                        // Manual Refresh Button
-                        IconButton(
-                            onClick = { viewModel.triggerImmediateRefresh() },
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("instant_refresh_button")
-                        ) {
-                            if (uiState.isRefreshingPrice) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Ema9Cyan
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh Sekarang",
-                                    tint = Ema9Cyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
                         }
                     }
                 }

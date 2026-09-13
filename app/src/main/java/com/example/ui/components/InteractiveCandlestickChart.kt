@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,11 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ShowChart
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,14 +43,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.CandleStick
 import com.example.data.model.MarketAsset
 import com.example.data.model.TechnicalIndicators
@@ -63,14 +67,15 @@ import com.example.ui.theme.RsiPurple
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.SurfaceCardBorder
 import com.example.ui.theme.SurfaceDark
+import com.example.ui.theme.SurfaceElevated
 import com.example.ui.theme.TerminalBg
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.WarningGold
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -90,7 +95,8 @@ fun InteractiveCandlestickChart(
             modifier = modifier
                 .fillMaxWidth()
                 .height(340.dp)
-                .background(SurfaceDark, RoundedCornerShape(12.dp)),
+                .background(SurfaceDark, RoundedCornerShape(14.dp))
+                .border(1.dp, SurfaceCardBorder, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -104,13 +110,16 @@ fun InteractiveCandlestickChart(
 
     // Interactive State
     var showEma by remember { mutableStateOf(true) }
-    var showBollinger by remember { mutableStateOf(true) }
+    var showBollinger by remember { mutableStateOf(false) }
     var subChart by remember { mutableStateOf(SubChartType.RSI) }
+    var isFullscreen by remember { mutableStateOf(false) }
 
     var candleSpacing by remember { mutableFloatStateOf(16f) }
     var scrollOffsetIndex by remember { mutableIntStateOf(0) }
     var crosshairCandleIndex by remember { mutableStateOf<Int?>(null) }
     var crosshairTouchY by remember { mutableFloatStateOf(-1f) }
+
+    var chartPlotWidth by remember { mutableFloatStateOf(0f) }
 
     Column(
         modifier = modifier
@@ -118,199 +127,280 @@ fun InteractiveCandlestickChart(
             .background(SurfaceDark, RoundedCornerShape(16.dp))
             .border(1.dp, SurfaceCardBorder, RoundedCornerShape(16.dp))
             .padding(12.dp)
-            .testTag("candlestick_chart_container")
+            .testTag("candlestick_chart_container"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Platform & TradingView Consensus Live Bar
+        // 1. Sleek Toolstrip: Indicators, Subchart Selector & Zoom Controls
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(BullGreen, androidx.compose.foundation.shape.CircleShape)
-                )
-                Text(
-                    text = "PLATFORM: ${asset.exchangeBadge}",
-                    color = BullGreen,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "(${asset.tvSymbol})",
-                    color = TextMuted,
-                    fontSize = 10.sp
-                )
-            }
-
-            asset.tvRating?.let { rating ->
-                val ratingColor = when (rating.action) {
-                    com.example.data.model.SignalAction.STRONG_BUY, com.example.data.model.SignalAction.BUY -> BullGreen
-                    com.example.data.model.SignalAction.STRONG_SELL, com.example.data.model.SignalAction.SELL -> BearRed
-                    com.example.data.model.SignalAction.NEUTRAL -> TextMuted
-                }
+            // Left: Indicator Toggles (EMA, Bollinger)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = ratingColor.copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, ratingColor.copy(alpha = 0.3f))
+                    onClick = { showEma = !showEma },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (showEma) Ema9Cyan.copy(alpha = 0.2f) else SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (showEma) Ema9Cyan else SurfaceCardBorder
+                    ),
+                    modifier = Modifier.testTag("toggle_ema")
                 ) {
                     Text(
-                        text = "TV: ${rating.action.label} (${String.format(Locale.US, "%+.2f", rating.score)})",
-                        color = ratingColor,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        text = "EMA 9/21",
+                        color = if (showEma) Ema9Cyan else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = if (showEma) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
+                }
+
+                Surface(
+                    onClick = { showBollinger = !showBollinger },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (showBollinger) BollingerLine.copy(alpha = 0.2f) else SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (showBollinger) BollingerLine else SurfaceCardBorder
+                    ),
+                    modifier = Modifier.testTag("toggle_bollinger")
+                ) {
+                    Text(
+                        text = "BOLL",
+                        color = if (showBollinger) BollingerLine else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = if (showBollinger) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                     )
                 }
             }
-        }
 
-        // Indicator Controls Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = showEma,
-                    onClick = { showEma = !showEma },
-                    label = { Text("EMA 9/21", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Ema9Cyan.copy(alpha = 0.2f),
-                        selectedLabelColor = Ema9Cyan
-                    ),
-                    modifier = Modifier.testTag("toggle_ema")
-                )
-                FilterChip(
-                    selected = showBollinger,
-                    onClick = { showBollinger = !showBollinger },
-                    label = { Text("Bollinger", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = BollingerLine.copy(alpha = 0.2f),
-                        selectedLabelColor = BollingerLine
-                    ),
-                    modifier = Modifier.testTag("toggle_bollinger")
-                )
-            }
-
-            // Sub-chart Toggle (RSI / MACD / Volume)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(SubChartType.RSI, SubChartType.MACD, SubChartType.VOLUME).forEach { type ->
-                    val isSelected = subChart == type
+            // Right: Subchart Selector (RSI / MACD / VOL / OFF) + Zoom Controls
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    SubChartType.RSI to "RSI",
+                    SubChartType.MACD to "MACD",
+                    SubChartType.VOLUME to "VOL",
+                    SubChartType.NONE to "OFF"
+                ).forEach { (type, label) ->
+                    val isSel = subChart == type
                     Surface(
-                        onClick = { subChart = if (isSelected) SubChartType.NONE else type },
+                        onClick = { subChart = type },
                         shape = RoundedCornerShape(6.dp),
-                        color = if (isSelected) SurfaceCard else Color.Transparent,
-                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder) else null,
-                        modifier = Modifier.padding(horizontal = 2.dp)
+                        color = if (isSel) SurfaceElevated else Color.Transparent,
+                        border = if (isSel) androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder) else null
                     ) {
                         Text(
-                            text = type.name,
+                            text = label,
+                            color = if (isSel) Ema9Cyan else TextMuted,
                             fontSize = 10.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) Ema9Cyan else TextMuted,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                         )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Zoom Out
+                Surface(
+                    onClick = { candleSpacing = (candleSpacing * 0.85f).coerceIn(8f, 36f) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                ) {
+                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = TextSecondary, modifier = Modifier.size(13.dp))
+                    }
+                }
+
+                // Zoom In
+                Surface(
+                    onClick = { candleSpacing = (candleSpacing * 1.18f).coerceIn(8f, 36f) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                ) {
+                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = TextSecondary, modifier = Modifier.size(13.dp))
+                    }
+                }
+
+                // Reset zoom/pan if modified
+                if (scrollOffsetIndex > 0 || candleSpacing != 16f || crosshairCandleIndex != null) {
+                    Surface(
+                        onClick = {
+                            scrollOffsetIndex = 0
+                            candleSpacing = 16f
+                            crosshairCandleIndex = null
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        color = SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                    ) {
+                        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = "Reset Chart", tint = WarningGold, modifier = Modifier.size(13.dp))
+                        }
+                    }
+                }
+
+                // Fullscreen Button
+                Surface(
+                    onClick = { isFullscreen = true },
+                    shape = RoundedCornerShape(6.dp),
+                    color = SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder),
+                    modifier = Modifier.testTag("btn_fullscreen_chart")
+                ) {
+                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Fullscreen, contentDescription = "Layar Penuh", tint = Ema9Cyan, modifier = Modifier.size(15.dp))
                     }
                 }
             }
         }
 
-        // Crosshair HUD Info Bar
+        // 2. High-Precision OHLC HUD Bar (Rapi, Terstruktur & Tidak Berantakan)
         val selectedCandle = crosshairCandleIndex?.let { idx ->
             candles.getOrNull(idx)
         } ?: candles.lastOrNull()
 
         selectedCandle?.let { c ->
-            val idx = crosshairCandleIndex ?: (candles.size - 1)
-            val dateStr = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date(c.timestamp))
-            val change = ((c.close - c.open) / c.open) * 100.0
+            val isInspecting = crosshairCandleIndex != null
+            val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(c.timestamp))
+            val change = if (c.open > 0) ((c.close - c.open) / c.open) * 100.0 else 0.0
             val isBull = c.isBullish
 
-            Row(
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceCard, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .testTag("ohlc_hud_bar"),
+                shape = RoundedCornerShape(10.dp),
+                color = SurfaceCard,
+                border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
             ) {
-                Text(
-                    text = dateStr,
-                    color = TextSecondary,
-                    fontSize = 11.sp
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "O: ${String.format(Locale.US, "%.${asset.decimals}f", c.open)}",
-                        color = TextPrimary,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "H: ${String.format(Locale.US, "%.${asset.decimals}f", c.high)}",
-                        color = BullGreen,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "L: ${String.format(Locale.US, "%.${asset.decimals}f", c.low)}",
-                        color = BearRed,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "C: ${String.format(Locale.US, "%.${asset.decimals}f", c.close)} (${String.format(Locale.US, "%+.2f%%", change)})",
-                        color = if (isBull) BullGreen else BearRed,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 11.sp
-                    )
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Top line: Status + Timestamp & Change %
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isInspecting) WarningGold.copy(alpha = 0.15f) else BullGreen.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isInspecting) WarningGold.copy(alpha = 0.4f) else BullGreen.copy(alpha = 0.4f)
+                                )
+                            ) {
+                                Text(
+                                    text = if (isInspecting) "TINJAU" else "LIVE",
+                                    color = if (isInspecting) WarningGold else BullGreen,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                            Text(
+                                text = dateStr,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isBull) BullGreen.copy(alpha = 0.15f) else BearRed.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = String.format(Locale.US, "%+.2f%%", change),
+                                color = if (isBull) BullGreen else BearRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Bottom line: 4 equal metric columns for O, H, L, C
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OhlcMetricItem(label = "O", value = String.format(Locale.US, "%,.${asset.decimals}f", c.open), color = TextPrimary)
+                        OhlcMetricItem(label = "H", value = String.format(Locale.US, "%,.${asset.decimals}f", c.high), color = BullGreen)
+                        OhlcMetricItem(label = "L", value = String.format(Locale.US, "%,.${asset.decimals}f", c.low), color = BearRed)
+                        OhlcMetricItem(label = "C", value = String.format(Locale.US, "%,.${asset.decimals}f", c.close), color = if (isBull) BullGreen else BearRed)
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Main Chart Canvas with Gesture Detection
+        // 3. Main Chart Canvas with Pinch-to-Zoom, Pan, and Tap/LongPress Crosshair
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(290.dp)
-                .pointerInput(Unit) {
+                .height(310.dp)
+                .pointerInput(candles.size) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        candleSpacing = (candleSpacing * zoom).coerceIn(8f, 36f)
-                        val deltaCandles = (pan.x / candleSpacing).toInt()
-                        scrollOffsetIndex = (scrollOffsetIndex - deltaCandles).coerceAtLeast(0)
+                        // Smooth pinch-to-zoom
+                        if (zoom != 1f) {
+                            val newSpacing = (candleSpacing * zoom).coerceIn(6f, 48f)
+                            candleSpacing = newSpacing
+                        }
+                        // Smooth horizontal panning
+                        if (pan.x != 0f) {
+                            val candleDelta = (pan.x / candleSpacing).toInt()
+                            if (candleDelta != 0) {
+                                val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                                val maxScroll = (candles.size - maxVis).coerceAtLeast(0)
+                                scrollOffsetIndex = (scrollOffsetIndex + candleDelta).coerceIn(0, maxScroll)
+                            }
+                        }
                     }
                 }
-                .pointerInput(Unit) {
+                .pointerInput(candles.size, candleSpacing, scrollOffsetIndex) {
                     detectTapGestures(
-                        onPress = { offset ->
-                            crosshairTouchY = offset.y
-                            // Will calculate candle index in draw scope
+                        onTap = { offset ->
+                            if (crosshairCandleIndex != null) {
+                                crosshairCandleIndex = null
+                            } else {
+                                val totalCandles = candles.size
+                                val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                                val start = (totalCandles - maxVis - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
+                                val local = (offset.x / candleSpacing).toInt()
+                                val target = (start + local).coerceIn(0, totalCandles - 1)
+                                crosshairCandleIndex = target
+                                crosshairTouchY = offset.y
+                            }
                         },
-                        onTap = {
+                        onLongPress = { offset ->
+                            val totalCandles = candles.size
+                            val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                            val start = (totalCandles - maxVis - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
+                            val local = (offset.x / candleSpacing).toInt()
+                            val target = (start + local).coerceIn(0, totalCandles - 1)
+                            crosshairCandleIndex = target
+                            crosshairTouchY = offset.y
+                        },
+                        onDoubleTap = {
+                            candleSpacing = 16f
+                            scrollOffsetIndex = 0
                             crosshairCandleIndex = null
-                        }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            crosshairTouchY = offset.y
-                        },
-                        onDrag = { change, _ ->
-                            crosshairTouchY = change.position.y
-                        },
-                        onDragEnd = {
-                            // keep crosshair for a moment or tap to dismiss
                         }
                     )
                 }
@@ -324,14 +414,15 @@ fun InteractiveCandlestickChart(
                 val canvasHeight = size.height
                 val priceScaleWidth = 72.dp.toPx()
                 val mainPlotWidth = canvasWidth - priceScaleWidth
+                chartPlotWidth = mainPlotWidth
 
                 // Sub-chart height allocation
                 val subChartHeight = if (subChart != SubChartType.NONE) 70.dp.toPx() else 0f
-                val subChartSpacing = if (subChart != SubChartType.NONE) 12.dp.toPx() else 0f
+                val subChartSpacing = if (subChart != SubChartType.NONE) 10.dp.toPx() else 0f
                 val mainChartHeight = canvasHeight - subChartHeight - subChartSpacing
 
                 // Calculate visible candle slice
-                val maxVisible = (mainPlotWidth / candleSpacing).toInt().coerceAtLeast(10)
+                val maxVisible = (mainPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
                 val totalCandles = candles.size
 
                 val startIdx = (totalCandles - maxVisible - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
@@ -340,8 +431,6 @@ fun InteractiveCandlestickChart(
 
                 if (visibleCandles.isEmpty()) return@Canvas
 
-                // Detect crosshair position if touched
-                // Using last touch X
                 // Main Chart Price Extents
                 var maxP = visibleCandles.maxOf { it.high }
                 var minP = visibleCandles.minOf { it.low }
@@ -356,8 +445,8 @@ fun InteractiveCandlestickChart(
                 }
 
                 val pRange = max(0.0001, maxP - minP)
-                val paddedMax = maxP + (pRange * 0.05)
-                val paddedMin = minP - (pRange * 0.05)
+                val paddedMax = maxP + (pRange * 0.06)
+                val paddedMin = minP - (pRange * 0.06)
 
                 fun priceToY(price: Double): Float {
                     val ratio = (price - paddedMin) / (paddedMax - paddedMin)
@@ -377,15 +466,24 @@ fun InteractiveCandlestickChart(
                     )
 
                     drawContext.canvas.nativeCanvas.drawText(
-                        String.format(Locale.US, "%.${asset.decimals}f", p),
-                        mainPlotWidth + 8f,
+                        String.format(Locale.US, "%,.${asset.decimals}f", p),
+                        mainPlotWidth + 6f,
                         y + 4f,
                         android.graphics.Paint().apply {
                             color = android.graphics.Color.parseColor("#64748B")
-                            textSize = 24f
+                            textSize = 22f
+                            isAntiAlias = true
                         }
                     )
                 }
+
+                // Vertical separator for right price scale
+                drawLine(
+                    color = SurfaceCardBorder,
+                    start = Offset(mainPlotWidth, 0f),
+                    end = Offset(mainPlotWidth, canvasHeight),
+                    strokeWidth = 1f
+                )
 
                 // 2. Draw Candlesticks and Overlays
                 val ema9Path = Path()
@@ -486,21 +584,113 @@ fun InteractiveCandlestickChart(
                     if (ema21Init) drawPath(path = ema21Path, color = Ema21Orange, style = Stroke(width = 2f))
                 }
 
-                // Current Price Live Line
-                val currentY = priceToY(visibleCandles.last().close)
+                // Current Price Live Line & Highlight Badge on Price Scale
+                val lastClosePrice = visibleCandles.last().close
+                val currentY = priceToY(lastClosePrice)
+                val isBullPrice = asset.change24h >= 0
+                val liveBadgeColor = if (isBullPrice) android.graphics.Color.parseColor("#00E676") else android.graphics.Color.parseColor("#FF3D57")
+
                 drawLine(
-                    color = if (asset.change24h >= 0) BullGreen else BearRed,
+                    color = if (isBullPrice) BullGreen else BearRed,
                     start = Offset(0f, currentY),
                     end = Offset(mainPlotWidth, currentY),
-                    strokeWidth = 1.5f,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))
+                    strokeWidth = 1.2f,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
                 )
 
-                // Sub-chart rendering (RSI / MACD / Volume)
+                // Draw live price pill on the right scale
+                drawContext.canvas.nativeCanvas.drawRoundRect(
+                    mainPlotWidth + 3f,
+                    currentY - 13f,
+                    canvasWidth - 2f,
+                    currentY + 13f,
+                    6f,
+                    6f,
+                    android.graphics.Paint().apply {
+                        color = liveBadgeColor
+                        style = android.graphics.Paint.Style.FILL
+                        isAntiAlias = true
+                    }
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    String.format(Locale.US, "%,.${asset.decimals}f", lastClosePrice),
+                    mainPlotWidth + 6f,
+                    currentY + 5f,
+                    android.graphics.Paint().apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 20f
+                        isFakeBoldText = true
+                        isAntiAlias = true
+                    }
+                )
+
+                // 3. Crosshair Overlay (Vertical & Horizontal lines + Inspected Price Badge)
+                crosshairCandleIndex?.let { cIdx ->
+                    val localIdx = cIdx - startIdx
+                    if (localIdx in 0 until visibleCandles.size) {
+                        val chX = (localIdx * candleSpacing) + (candleSpacing / 2f)
+                        val chY = crosshairTouchY.coerceIn(0f, mainChartHeight)
+
+                        // Vertical dashed line
+                        drawLine(
+                            color = CrosshairLine,
+                            start = Offset(chX, 0f),
+                            end = Offset(chX, canvasHeight),
+                            strokeWidth = 1f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
+                        )
+
+                        // Horizontal dashed line
+                        drawLine(
+                            color = CrosshairLine,
+                            start = Offset(0f, chY),
+                            end = Offset(mainPlotWidth, chY),
+                            strokeWidth = 1f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
+                        )
+
+                        // Price tag badge on right axis at chY
+                        val touchedPrice = paddedMax - (chY / mainChartHeight) * (paddedMax - paddedMin)
+                        drawContext.canvas.nativeCanvas.drawRoundRect(
+                            mainPlotWidth + 3f,
+                            chY - 13f,
+                            canvasWidth - 2f,
+                            chY + 13f,
+                            6f,
+                            6f,
+                            android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#1E293B")
+                                style = android.graphics.Paint.Style.FILL
+                                isAntiAlias = true
+                            }
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            String.format(Locale.US, "%,.${asset.decimals}f", touchedPrice),
+                            mainPlotWidth + 6f,
+                            chY + 5f,
+                            android.graphics.Paint().apply {
+                                color = android.graphics.Color.WHITE
+                                textSize = 20f
+                                isFakeBoldText = true
+                                isAntiAlias = true
+                            }
+                        )
+                    }
+                }
+
+                // 4. Sub-chart rendering (RSI / MACD / Volume)
                 if (subChart != SubChartType.NONE) {
                     val subTop = mainChartHeight + subChartSpacing
                     val subBottom = canvasHeight
                     val subHeight = subBottom - subTop
+
+                    // Sub-chart horizontal separator line
+                    drawLine(
+                        color = SurfaceCardBorder,
+                        start = Offset(0f, subTop - subChartSpacing / 2f),
+                        end = Offset(canvasWidth, subTop - subChartSpacing / 2f),
+                        strokeWidth = 1f
+                    )
 
                     // Sub-chart background
                     drawRect(
@@ -511,7 +701,6 @@ fun InteractiveCandlestickChart(
 
                     when (subChart) {
                         SubChartType.RSI -> {
-                            // RSI 70/30 lines
                             fun rsiY(rsiVal: Double): Float {
                                 val clamped = rsiVal.coerceIn(0.0, 100.0)
                                 return (subBottom - ((clamped / 100.0) * subHeight)).toFloat()
@@ -545,13 +734,14 @@ fun InteractiveCandlestickChart(
                             if (rsiInit) {
                                 drawPath(path = rsiPath, color = RsiPurple, style = Stroke(width = 2f))
                             }
-                            drawContext.canvas.nativeCanvas.drawText("RSI (14)", 10f, subTop + 24f, android.graphics.Paint().apply {
+                            val curRsi = indicators.currentRsi?.let { String.format(Locale.US, "%.1f", it) } ?: "--"
+                            drawContext.canvas.nativeCanvas.drawText("RSI(14): $curRsi", 10f, subTop + 22f, android.graphics.Paint().apply {
                                 color = android.graphics.Color.parseColor("#E040FB")
                                 textSize = 22f
+                                isAntiAlias = true
                             })
                         }
                         SubChartType.MACD -> {
-                            // Zero line
                             val zeroY = subTop + (subHeight / 2f)
                             drawLine(color = ChartGridLine, start = Offset(0f, zeroY), end = Offset(mainPlotWidth, zeroY), strokeWidth = 1f)
 
@@ -569,9 +759,10 @@ fun InteractiveCandlestickChart(
                                     )
                                 }
                             }
-                            drawContext.canvas.nativeCanvas.drawText("MACD (12,26,9)", 10f, subTop + 24f, android.graphics.Paint().apply {
+                            drawContext.canvas.nativeCanvas.drawText("MACD(12,26,9)", 10f, subTop + 22f, android.graphics.Paint().apply {
                                 color = android.graphics.Color.parseColor("#2979FF")
                                 textSize = 22f
+                                isAntiAlias = true
                             })
                         }
                         SubChartType.VOLUME -> {
@@ -587,9 +778,10 @@ fun InteractiveCandlestickChart(
                                     size = Size(candleBodyWidth, vH)
                                 )
                             }
-                            drawContext.canvas.nativeCanvas.drawText("Volume", 10f, subTop + 24f, android.graphics.Paint().apply {
+                            drawContext.canvas.nativeCanvas.drawText("Volume", 10f, subTop + 22f, android.graphics.Paint().apply {
                                 color = android.graphics.Color.parseColor("#94A3B8")
                                 textSize = 22f
+                                isAntiAlias = true
                             })
                         }
                         SubChartType.NONE -> {}
@@ -598,4 +790,634 @@ fun InteractiveCandlestickChart(
             }
         }
     }
+
+    if (isFullscreen) {
+        Dialog(
+            onDismissRequest = { isFullscreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            FullScreenCandlestickChartDialog(
+                asset = asset,
+                candles = candles,
+                indicators = indicators,
+                onDismiss = { isFullscreen = false }
+            )
+        }
+    }
 }
+
+@Composable
+private fun OhlcMetricItem(
+    label: String,
+    value: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(
+            text = label,
+            color = TextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = value,
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace
+        )
+    }
+}
+
+@Composable
+private fun FullScreenCandlestickChartDialog(
+    asset: MarketAsset,
+    candles: List<CandleStick>,
+    indicators: TechnicalIndicators,
+    onDismiss: () -> Unit
+) {
+    var showEma by remember { mutableStateOf(true) }
+    var showBollinger by remember { mutableStateOf(false) }
+    var subChart by remember { mutableStateOf(SubChartType.RSI) }
+
+    var candleSpacing by remember { mutableFloatStateOf(18f) }
+    var scrollOffsetIndex by remember { mutableIntStateOf(0) }
+    var crosshairCandleIndex by remember { mutableStateOf<Int?>(null) }
+    var crosshairTouchY by remember { mutableFloatStateOf(-1f) }
+
+    var chartPlotWidth by remember { mutableFloatStateOf(0f) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(TerminalBg)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Header: Symbol, Live Price, Indicators, and Close Fullscreen
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Tutup Layar Penuh", tint = TextPrimary)
+                    }
+                    Text(
+                        text = asset.symbol,
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "LIVE",
+                        color = BullGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(BullGreen.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // EMA Toggle
+                    Surface(
+                        onClick = { showEma = !showEma },
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (showEma) Ema9Cyan.copy(alpha = 0.2f) else SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (showEma) Ema9Cyan else SurfaceCardBorder)
+                    ) {
+                        Text(
+                            text = "EMA",
+                            color = if (showEma) Ema9Cyan else TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
+                    // BOLL Toggle
+                    Surface(
+                        onClick = { showBollinger = !showBollinger },
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (showBollinger) BollingerLine.copy(alpha = 0.2f) else SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (showBollinger) BollingerLine else SurfaceCardBorder)
+                    ) {
+                        Text(
+                            text = "BOLL",
+                            color = if (showBollinger) BollingerLine else TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    // Subcharts
+                    listOf(
+                        SubChartType.RSI to "RSI",
+                        SubChartType.MACD to "MACD",
+                        SubChartType.VOLUME to "VOL",
+                        SubChartType.NONE to "OFF"
+                    ).forEach { (type, label) ->
+                        val isSel = subChart == type
+                        Surface(
+                            onClick = { subChart = type },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isSel) SurfaceElevated else Color.Transparent,
+                            border = if (isSel) androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder) else null
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSel) Ema9Cyan else TextMuted,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Zoom Out
+                    Surface(
+                        onClick = { candleSpacing = (candleSpacing * 0.82f).coerceIn(6f, 48f) },
+                        shape = RoundedCornerShape(6.dp),
+                        color = SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                    ) {
+                        Box(modifier = Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = TextSecondary, modifier = Modifier.size(13.dp))
+                        }
+                    }
+                    // Zoom In
+                    Surface(
+                        onClick = { candleSpacing = (candleSpacing * 1.22f).coerceIn(6f, 48f) },
+                        shape = RoundedCornerShape(6.dp),
+                        color = SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                    ) {
+                        Box(modifier = Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = TextSecondary, modifier = Modifier.size(13.dp))
+                        }
+                    }
+                    // Reset
+                    if (scrollOffsetIndex > 0 || candleSpacing != 18f || crosshairCandleIndex != null) {
+                        Surface(
+                            onClick = {
+                                scrollOffsetIndex = 0
+                                candleSpacing = 18f
+                                crosshairCandleIndex = null
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = SurfaceCard,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                        ) {
+                            Box(modifier = Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.RestartAlt, contentDescription = "Reset Chart", tint = WarningGold, modifier = Modifier.size(13.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // OHLC Metrics Banner in Fullscreen
+            val selectedCandle = crosshairCandleIndex?.let { idx ->
+                candles.getOrNull(idx)
+            } ?: candles.lastOrNull()
+
+            selectedCandle?.let { c ->
+                val isInspecting = crosshairCandleIndex != null
+                val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(c.timestamp))
+                val change = if (c.open > 0) ((c.close - c.open) / c.open) * 100.0 else 0.0
+                val isBull = c.isBullish
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (isInspecting) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(WarningGold, RoundedCornerShape(3.dp))
+                                )
+                            }
+                            Text(
+                                text = dateStr,
+                                color = if (isInspecting) WarningGold else TextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OhlcMetricItem(label = "O", value = String.format(Locale.US, "%,.${asset.decimals}f", c.open), color = TextPrimary)
+                            OhlcMetricItem(label = "H", value = String.format(Locale.US, "%,.${asset.decimals}f", c.high), color = BullGreen)
+                            OhlcMetricItem(label = "L", value = String.format(Locale.US, "%,.${asset.decimals}f", c.low), color = BearRed)
+                            OhlcMetricItem(label = "C", value = String.format(Locale.US, "%,.${asset.decimals}f", c.close), color = if (isBull) BullGreen else BearRed)
+                            Text(
+                                text = String.format(Locale.US, "%+.2f%%", change),
+                                color = if (isBull) BullGreen else BearRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Fullscreen Canvas Container (Fills rest of screen)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .pointerInput(candles.size) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            if (zoom != 1f) {
+                                candleSpacing = (candleSpacing * zoom).coerceIn(6f, 48f)
+                            }
+                            if (pan.x != 0f) {
+                                val delta = (pan.x / candleSpacing).toInt()
+                                if (delta != 0) {
+                                    val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                                    val maxScroll = (candles.size - maxVis).coerceAtLeast(0)
+                                    scrollOffsetIndex = (scrollOffsetIndex + delta).coerceIn(0, maxScroll)
+                                }
+                            }
+                        }
+                    }
+                    .pointerInput(candles.size, candleSpacing, scrollOffsetIndex) {
+                        detectTapGestures(
+                            onTap = { offset ->
+                                if (crosshairCandleIndex != null) {
+                                    crosshairCandleIndex = null
+                                } else {
+                                    val totalCandles = candles.size
+                                    val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                                    val start = (totalCandles - maxVis - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
+                                    val local = (offset.x / candleSpacing).toInt()
+                                    val target = (start + local).coerceIn(0, totalCandles - 1)
+                                    crosshairCandleIndex = target
+                                    crosshairTouchY = offset.y
+                                }
+                            },
+                            onLongPress = { offset ->
+                                val totalCandles = candles.size
+                                val maxVis = (chartPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                                val start = (totalCandles - maxVis - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
+                                val local = (offset.x / candleSpacing).toInt()
+                                val target = (start + local).coerceIn(0, totalCandles - 1)
+                                crosshairCandleIndex = target
+                                crosshairTouchY = offset.y
+                            },
+                            onDoubleTap = {
+                                candleSpacing = 18f
+                                scrollOffsetIndex = 0
+                                crosshairCandleIndex = null
+                            }
+                        )
+                    }
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val canvasWidth = size.width
+                    val canvasHeight = size.height
+                    val priceScaleWidth = 76.dp.toPx()
+                    val mainPlotWidth = canvasWidth - priceScaleWidth
+                    chartPlotWidth = mainPlotWidth
+
+                    val subChartHeight = if (subChart != SubChartType.NONE) 80.dp.toPx() else 0f
+                    val subChartSpacing = if (subChart != SubChartType.NONE) 10.dp.toPx() else 0f
+                    val mainChartHeight = canvasHeight - subChartHeight - subChartSpacing
+
+                    val maxVisible = (mainPlotWidth / candleSpacing).toInt().coerceAtLeast(8)
+                    val totalCandles = candles.size
+                    val startIdx = (totalCandles - maxVisible - scrollOffsetIndex).coerceIn(0, totalCandles - 1)
+                    val endIdx = (startIdx + maxVisible).coerceAtMost(totalCandles)
+                    val visibleCandles = candles.subList(startIdx, endIdx)
+
+                    if (visibleCandles.isEmpty()) return@Canvas
+
+                    var maxP = visibleCandles.maxOf { it.high }
+                    var minP = visibleCandles.minOf { it.low }
+
+                    if (showBollinger) {
+                        for (i in startIdx until endIdx) {
+                            indicators.bollingerBands.getOrNull(i)?.let { bb ->
+                                maxP = max(maxP, bb.upper)
+                                minP = min(minP, bb.lower)
+                            }
+                        }
+                    }
+
+                    val pRange = max(0.0001, maxP - minP)
+                    val paddedMax = maxP + (pRange * 0.06)
+                    val paddedMin = minP - (pRange * 0.06)
+
+                    fun priceToY(price: Double): Float {
+                        val ratio = (price - paddedMin) / (paddedMax - paddedMin)
+                        return (mainChartHeight - (ratio * mainChartHeight)).toFloat()
+                    }
+
+                    // Draw Horizontal Grid Lines
+                    val gridSteps = 6
+                    for (step in 0..gridSteps) {
+                        val p = paddedMin + ((paddedMax - paddedMin) * (step.toDouble() / gridSteps))
+                        val y = priceToY(p)
+                        drawLine(
+                            color = ChartGridLine,
+                            start = Offset(0f, y),
+                            end = Offset(mainPlotWidth, y),
+                            strokeWidth = 1f
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            String.format(Locale.US, "%,.${asset.decimals}f", p),
+                            mainPlotWidth + 6f,
+                            y + 4f,
+                            android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#64748B")
+                                textSize = 22f
+                                isAntiAlias = true
+                            }
+                        )
+                    }
+
+                    // Draw Candles & Indicators
+                    val ema9Path = Path()
+                    val ema21Path = Path()
+                    val bbUpperPath = Path()
+                    val bbLowerPath = Path()
+                    var ema9Init = false
+                    var ema21Init = false
+                    var bbInit = false
+
+                    val candleBodyWidth = (candleSpacing * 0.68f).coerceAtLeast(2f)
+
+                    for (i in visibleCandles.indices) {
+                        val candle = visibleCandles[i]
+                        val globalIndex = startIdx + i
+                        val x = (i * candleSpacing) + (candleSpacing / 2f)
+
+                        val openY = priceToY(candle.open)
+                        val closeY = priceToY(candle.close)
+                        val highY = priceToY(candle.high)
+                        val lowY = priceToY(candle.low)
+
+                        val isBull = candle.isBullish
+                        val candleColor = if (isBull) BullGreen else BearRed
+
+                        drawLine(
+                            color = candleColor,
+                            start = Offset(x, highY),
+                            end = Offset(x, lowY),
+                            strokeWidth = 1.5f
+                        )
+
+                        val topY = min(openY, closeY)
+                        val bottomY = max(openY, closeY).coerceAtLeast(topY + 1.5f)
+                        drawRect(
+                            color = candleColor,
+                            topLeft = Offset(x - (candleBodyWidth / 2f), topY),
+                            size = Size(candleBodyWidth, bottomY - topY)
+                        )
+
+                        if (showEma) {
+                            indicators.ema9.getOrNull(globalIndex)?.let { e9 ->
+                                val y = priceToY(e9)
+                                if (!ema9Init) {
+                                    ema9Path.moveTo(x, y)
+                                    ema9Init = true
+                                } else {
+                                    ema9Path.lineTo(x, y)
+                                }
+                            }
+                            indicators.ema21.getOrNull(globalIndex)?.let { e21 ->
+                                val y = priceToY(e21)
+                                if (!ema21Init) {
+                                    ema21Path.moveTo(x, y)
+                                    ema21Init = true
+                                } else {
+                                    ema21Path.lineTo(x, y)
+                                }
+                            }
+                        }
+
+                        if (showBollinger) {
+                            indicators.bollingerBands.getOrNull(globalIndex)?.let { bb ->
+                                val uy = priceToY(bb.upper)
+                                val ly = priceToY(bb.lower)
+                                if (!bbInit) {
+                                    bbUpperPath.moveTo(x, uy)
+                                    bbLowerPath.moveTo(x, ly)
+                                    bbInit = true
+                                } else {
+                                    bbUpperPath.lineTo(x, uy)
+                                    bbLowerPath.lineTo(x, ly)
+                                }
+                            }
+                        }
+                    }
+
+                    if (showBollinger && bbInit) {
+                        drawPath(
+                            path = bbUpperPath,
+                            color = BollingerLine.copy(alpha = 0.7f),
+                            style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+                        )
+                        drawPath(
+                            path = bbLowerPath,
+                            color = BollingerLine.copy(alpha = 0.7f),
+                            style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+                        )
+                    }
+
+                    if (showEma) {
+                        if (ema9Init) drawPath(path = ema9Path, color = Ema9Cyan, style = Stroke(width = 2f))
+                        if (ema21Init) drawPath(path = ema21Path, color = Ema21Orange, style = Stroke(width = 2f))
+                    }
+
+                    // Crosshair overlay
+                    crosshairCandleIndex?.let { cIdx ->
+                        val localIdx = cIdx - startIdx
+                        if (localIdx in 0 until visibleCandles.size) {
+                            val chX = (localIdx * candleSpacing) + (candleSpacing / 2f)
+                            val chY = crosshairTouchY.coerceIn(0f, mainChartHeight)
+
+                            drawLine(
+                                color = CrosshairLine,
+                                start = Offset(chX, 0f),
+                                end = Offset(chX, canvasHeight),
+                                strokeWidth = 1f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
+                            )
+
+                            drawLine(
+                                color = CrosshairLine,
+                                start = Offset(0f, chY),
+                                end = Offset(mainPlotWidth, chY),
+                                strokeWidth = 1f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
+                            )
+
+                            val touchedPrice = paddedMax - (chY / mainChartHeight) * (paddedMax - paddedMin)
+                            drawContext.canvas.nativeCanvas.drawRoundRect(
+                                mainPlotWidth + 3f,
+                                chY - 13f,
+                                canvasWidth - 2f,
+                                chY + 13f,
+                                6f,
+                                6f,
+                                android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#1E293B")
+                                    style = android.graphics.Paint.Style.FILL
+                                    isAntiAlias = true
+                                }
+                            )
+                            drawContext.canvas.nativeCanvas.drawText(
+                                String.format(Locale.US, "%,.${asset.decimals}f", touchedPrice),
+                                mainPlotWidth + 6f,
+                                chY + 5f,
+                                android.graphics.Paint().apply {
+                                    color = android.graphics.Color.WHITE
+                                    textSize = 20f
+                                    isFakeBoldText = true
+                                    isAntiAlias = true
+                                }
+                            )
+                        }
+                    }
+
+                    // Subchart in Fullscreen
+                    if (subChart != SubChartType.NONE) {
+                        val subTop = mainChartHeight + subChartSpacing
+                        val subBottom = canvasHeight
+                        val subHeight = subBottom - subTop
+
+                        drawLine(
+                            color = SurfaceCardBorder,
+                            start = Offset(0f, subTop - subChartSpacing / 2f),
+                            end = Offset(canvasWidth, subTop - subChartSpacing / 2f),
+                            strokeWidth = 1f
+                        )
+
+                        drawRect(
+                            color = Color(0xFF0F131C),
+                            topLeft = Offset(0f, subTop),
+                            size = Size(mainPlotWidth, subHeight)
+                        )
+
+                        when (subChart) {
+                            SubChartType.RSI -> {
+                                fun rsiY(rsiVal: Double): Float =
+                                    (subBottom - ((rsiVal.toFloat() / 100f) * subHeight)).coerceIn(subTop, subBottom)
+
+                                drawLine(color = ChartGridLine, start = Offset(0f, rsiY(70.0)), end = Offset(mainPlotWidth, rsiY(70.0)), strokeWidth = 1f)
+                                drawLine(color = ChartGridLine, start = Offset(0f, rsiY(30.0)), end = Offset(mainPlotWidth, rsiY(30.0)), strokeWidth = 1f)
+
+                                val rsiPath = Path()
+                                var rsiInit = false
+                                for (i in visibleCandles.indices) {
+                                    val globalIndex = startIdx + i
+                                    val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                    indicators.rsi14.getOrNull(globalIndex)?.let { rsiVal ->
+                                        val y = rsiY(rsiVal)
+                                        if (!rsiInit) {
+                                            rsiPath.moveTo(x, y)
+                                            rsiInit = true
+                                        } else {
+                                            rsiPath.lineTo(x, y)
+                                        }
+                                    }
+                                }
+                                if (rsiInit) drawPath(path = rsiPath, color = RsiPurple, style = Stroke(width = 2f))
+                                val curRsi = indicators.rsi14.getOrNull(endIdx - 1)?.let { String.format(Locale.US, "%.1f", it) } ?: "--"
+                                drawContext.canvas.nativeCanvas.drawText("RSI(14): $curRsi", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#E040FB")
+                                    textSize = 22f
+                                    isAntiAlias = true
+                                })
+                            }
+                            SubChartType.MACD -> {
+                                val zeroY = subTop + (subHeight / 2f)
+                                drawLine(color = ChartGridLine, start = Offset(0f, zeroY), end = Offset(mainPlotWidth, zeroY), strokeWidth = 1f)
+
+                                for (i in visibleCandles.indices) {
+                                    val globalIndex = startIdx + i
+                                    val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                    indicators.macd.getOrNull(globalIndex)?.let { macdPt ->
+                                        val barH = (macdPt.histogram * 20f).toFloat().coerceIn(-subHeight / 2f, subHeight / 2f)
+                                        val barColor = if (macdPt.histogram >= 0) BullGreen else BearRed
+                                        drawLine(
+                                            color = barColor,
+                                            start = Offset(x, zeroY),
+                                            end = Offset(x, zeroY - barH),
+                                            strokeWidth = (candleBodyWidth * 0.7f).coerceAtLeast(1.5f)
+                                        )
+                                    }
+                                }
+                                drawContext.canvas.nativeCanvas.drawText("MACD(12,26,9)", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#2979FF")
+                                    textSize = 22f
+                                    isAntiAlias = true
+                                })
+                            }
+                            SubChartType.VOLUME -> {
+                                val maxVol = visibleCandles.maxOfOrNull { it.volume } ?: 1.0
+                                for (i in visibleCandles.indices) {
+                                    val c = visibleCandles[i]
+                                    val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                    val vH = ((c.volume / maxVol) * (subHeight * 0.9f)).toFloat()
+                                    val vColor = if (c.isBullish) BullGreen.copy(alpha = 0.5f) else BearRed.copy(alpha = 0.5f)
+                                    drawRect(
+                                        color = vColor,
+                                        topLeft = Offset(x - (candleBodyWidth / 2f), subBottom - vH),
+                                        size = Size(candleBodyWidth, vH)
+                                    )
+                                }
+                                drawContext.canvas.nativeCanvas.drawText("Volume", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#94A3B8")
+                                    textSize = 22f
+                                    isAntiAlias = true
+                                })
+                            }
+                            SubChartType.NONE -> {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
