@@ -4,10 +4,16 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.bot.BacktestEngine
+import com.example.data.bot.BacktestReport
+import com.example.data.bot.BotStrategyType
+import com.example.data.bot.BotUiState
+import com.example.data.bot.TradingBotManager
 import com.example.data.calculator.IndicatorCalculator
 import com.example.data.fetcher.MarketDataFetcher
 import com.example.data.gemini.ChartImageRenderer
 import com.example.data.gemini.GeminiAnalystClient
+import com.example.data.mexc.MexcApiClient
 import com.example.data.model.AlertType
 import com.example.data.model.AiAnalysisResult
 import com.example.data.model.CandleStick
@@ -57,6 +63,15 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
     private val fetcher = MarketDataFetcher()
     private val geminiClient = GeminiAnalystClient()
     private val notificationManager = SignalNotificationManager(application)
+    val mexcClient = MexcApiClient()
+    val tradingBotManager = TradingBotManager(application, mexcClient, viewModelScope)
+    val botState: StateFlow<BotUiState> = tradingBotManager.botState
+
+    private val _backtestReport = MutableStateFlow<BacktestReport?>(null)
+    val backtestReport: StateFlow<BacktestReport?> = _backtestReport.asStateFlow()
+
+    private val _isBacktesting = MutableStateFlow(false)
+    val isBacktesting: StateFlow<Boolean> = _isBacktesting.asStateFlow()
 
     private val _uiState = MutableStateFlow(MarketUiState())
     val uiState: StateFlow<MarketUiState> = _uiState.asStateFlow()
@@ -411,14 +426,31 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             if (realPrice > 0.0) {
                 _uiState.update { s ->
                     val nowCandles = s.candles
+                    val tfMinutes = s.selectedTimeframe.minutes
+                    val tfDurationMs = tfMinutes * 60 * 1000L
+                    val now = System.currentTimeMillis()
+
                     val updatedCandles = if (nowCandles.isNotEmpty()) {
                         val last = nowCandles.last()
-                        val updatedCandle = last.copy(
-                            close = realPrice,
-                            high = max(last.high, realPrice),
-                            low = min(last.low, realPrice)
-                        )
-                        nowCandles.dropLast(1) + updatedCandle
+                        // If the current candle time boundary has elapsed, append a new candle
+                        if (tfDurationMs > 0 && (now - last.timestamp) >= tfDurationMs) {
+                            val newCandle = CandleStick(
+                                timestamp = last.timestamp + tfDurationMs,
+                                open = last.close,
+                                high = max(last.close, realPrice),
+                                low = min(last.close, realPrice),
+                                close = realPrice,
+                                volume = 1.0
+                            )
+                            nowCandles + newCandle
+                        } else {
+                            val updatedCandle = last.copy(
+                                close = realPrice,
+                                high = max(last.high, realPrice),
+                                low = min(last.low, realPrice)
+                            )
+                            nowCandles.dropLast(1) + updatedCandle
+                        }
                     } else nowCandles
 
                     val updatedAsset = s.selectedAsset.copy(
@@ -446,6 +478,12 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
                 checkAlerts(realPrice, _uiState.value.indicators)
+                // Evaluate Trading Bot on each market tick
+                tradingBotManager.evaluateMarketTick(
+                    symbol = asset.symbol,
+                    currentPrice = realPrice,
+                    candles = _uiState.value.candles
+                )
             }
 
             // Periodically refresh ratings from TradingView scanner
@@ -500,6 +538,78 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    fun runMexcBacktest(symbol: String, interval: String = "15m", limit: Int = 250) {
+        viewModelScope.launch {
+            _isBacktesting.value = true
+            try {
+                // Fetch real historical candles from MEXC API
+                val cleanSymbol = symbol.replace("/", "").replace(":", "").uppercase()
+                val mexcKlinesResult = mexcClient.getKlines(cleanSymbol, interval, limit)
+                val testCandles = if (mexcKlinesResult.isSuccess && mexcKlinesResult.getOrThrow().isNotEmpty()) {
+                    mexcKlinesResult.getOrThrow()
+                } else {
+                    _uiState.value.candles
+                }
+
+                val currentBot = botState.value
+                val report = BacktestEngine.runBacktest(
+                    symbol = symbol,
+                    candles = testCandles,
+                    strategy = currentBot.strategy,
+                    initialCapital = 1000.0,
+                    stopLossPct = currentBot.customSlPct,
+                    takeProfitPct = currentBot.customTpPct,
+                    trailingPct = currentBot.customTrailingPct,
+                    allocationPct = currentBot.tradeAllocationPct
+                )
+                _backtestReport.value = report
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isBacktesting.value = false
+            }
+        }
+    }
+
+    /**
+     * Executes immediate on-demand market analysis and order placement using Gemini AI Trader.
+     */
+    fun executeGeminiTraderNow() {
+        val state = _uiState.value
+        val candles = state.candles
+        if (candles.isEmpty()) return
+        val currentPrice = state.selectedAsset.currentPrice
+        val symbol = state.selectedAsset.symbol.replace("/", "").replace(":", "").uppercase()
+        tradingBotManager.requestGeminiTraderExecution(
+            symbol = symbol,
+            currentPrice = currentPrice,
+            candles = candles
+        )
+    }
+
+    /**
+     * Executes instant market buy with risk management trailing stop.
+     */
+    fun executeInstantBuyNow() {
+        val state = _uiState.value
+        val candles = state.candles
+        if (candles.isEmpty()) return
+        val currentPrice = state.selectedAsset.currentPrice
+        val symbol = state.selectedAsset.symbol.replace("/", "").replace(":", "").uppercase()
+        tradingBotManager.executeInstantManualBuy(
+            symbol = symbol,
+            currentPrice = currentPrice,
+            candles = candles
+        )
+    }
+
+    /**
+     * Updates custom Gemini API key and clears quota limit lock.
+     */
+    fun updateGeminiApiKey(geminiKey: String) {
+        tradingBotManager.setGeminiApiKey(geminiKey)
     }
 
     override fun onCleared() {

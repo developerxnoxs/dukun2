@@ -35,10 +35,13 @@
 ### 📈 2. Indikator Teknikal Otomatis
 - **Exponential Moving Average (EMA 9 & EMA 21)** untuk mengidentifikasi arah tren secara akurat.
 - **Bollinger Bands (20, 2)** untuk mengukur volatilitas pasar dan area overextension.
+- **Support & Resistance (S/R) & Pivot Points**: Garis otomatis level R1, S1, dan Pivot Point langsung pada kanvas chart.
 - **Sub-Chart Modular**:
   - **RSI (Relative Strength Index 14)** dengan area Overbought (70) dan Oversold (30).
   - **MACD (12, 26, 9)** dengan histogram bullish/bearish visual.
-  - **Volume Bar** dengan pewarnaan dinamis sesuai candle pembeli/penjual.
+  - **Stochastic Oscillator (%K, %D)** untuk deteksi titik jenuh beli dan jual secara presisi.
+  - **ATR (Average True Range 14)** untuk kalkulasi volatilitas pasar real-time.
+  - **Volume Bar** dengan pewarnaan dinamis sesuai volume buyer/seller.
 
 ### 🧠 3. Analisis Teknikal Berbasis AI (Gemini Multimodal Vision)
 - Melakukan snapshot chart beresolusi tinggi langsung dari kanvas aplikasi.

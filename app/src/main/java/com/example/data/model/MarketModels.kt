@@ -92,6 +92,11 @@ enum class ExchangePlatform(
         provider = "TradingView WebSocket via Xnoxs Engine",
         badgeLabel = "BEI"
     ),
+    MEXC(
+        title = "MEXC Spot Engine Feed",
+        provider = "MEXC Spot V3 API (api.mexc.com)",
+        badgeLabel = "MEXC"
+    ),
     OTHER(
         title = "TradingView Live Feed",
         provider = "TradingView WebSocket via Xnoxs Engine",
@@ -102,6 +107,7 @@ enum class ExchangePlatform(
         fun fromExchange(exchange: String?): ExchangePlatform {
             val ex = exchange?.uppercase() ?: ""
             return when {
+                ex.contains("MEXC") -> MEXC
                 ex.contains("BINANCE") -> BINANCE_SPOT
                 ex.contains("OANDA") -> OANDA_TRADINGVIEW
                 ex.contains("BYBIT") -> BYBIT
@@ -198,6 +204,11 @@ data class MacdPoint(
     val histogram: Double
 )
 
+data class StochasticPoint(
+    val k: Double,
+    val d: Double
+)
+
 data class LivePriceUpdate(
     val price: Double,
     val change24h: Double? = null,
@@ -213,9 +224,13 @@ data class TechnicalIndicators(
     val rsi14: List<Double?>,
     val bollingerBands: List<BollingerBandPoint?>,
     val macd: List<MacdPoint?>,
+    val stochastic: List<StochasticPoint?> = emptyList(),
+    val atr14: List<Double?> = emptyList(),
     val currentRsi: Double?,
     val currentMacd: MacdPoint?,
     val currentBollinger: BollingerBandPoint?,
+    val currentStochastic: StochasticPoint? = null,
+    val currentAtr: Double? = null,
     val supportLevel1: Double,
     val supportLevel2: Double,
     val resistanceLevel1: Double,

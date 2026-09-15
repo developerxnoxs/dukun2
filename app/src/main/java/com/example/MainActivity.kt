@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -63,6 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -78,6 +81,7 @@ import com.example.ui.components.AlertsDialog
 import com.example.ui.components.InteractiveCandlestickChart
 import com.example.ui.components.SymbolSearchDialog
 import com.example.ui.components.WatchlistBar
+import com.example.ui.components.bot.TradingBotDialog
 import com.example.ui.theme.BearRed
 import com.example.ui.theme.BullGreen
 import com.example.ui.theme.Ema9Cyan
@@ -114,9 +118,13 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(viewModel: MarketViewModel) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val botState by viewModel.botState.collectAsState()
+    val backtestReport by viewModel.backtestReport.collectAsState()
+    val isBacktesting by viewModel.isBacktesting.collectAsState()
 
     var showAlertDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
+    var showBotDialog by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("ALL") } // "ALL", "CRYPTO", "FOREX", "COMMODITY"
 
     // Request Notification permission for Android 13+
@@ -211,6 +219,39 @@ fun MainScreen(viewModel: MarketViewModel) {
                     }
                 },
                 actions = {
+                    // MEXC AutoTrading Bot Direct Button
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (botState.isRunning) BullGreen.copy(alpha = 0.18f) else SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (botState.isRunning) BullGreen else SurfaceCardBorder
+                        ),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showBotDialog = true }
+                            .testTag("top_bot_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = "AutoTrading Bot",
+                                tint = if (botState.isRunning) BullGreen else Ema9Cyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (botState.isRunning) "BOT ON" else "MEXC BOT",
+                                color = if (botState.isRunning) BullGreen else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
                     // Search & Add Symbol Button
                     IconButton(
                         onClick = { showSearchDialog = true },
@@ -553,6 +594,121 @@ fun MainScreen(viewModel: MarketViewModel) {
                 indicators = uiState.indicators
             )
 
+            // MEXC AutoTrading Bot Quick Control Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, SurfaceCardBorder, RoundedCornerShape(12.dp))
+                    .clickable { showBotDialog = true }
+                    .testTag("bot_quick_card"),
+                color = SurfaceCard
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(if (botState.isRunning) BullGreen.copy(alpha = 0.2f) else SurfaceElevated),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SmartToy,
+                                    contentDescription = null,
+                                    tint = if (botState.isRunning) BullGreen else Ema9Cyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Bot Trading Gemini AI",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (botState.isSandbox) Color(0xFF1E3A8A) else Color(0xFF7F1D1D)
+                                    ) {
+                                        Text(
+                                            text = if (botState.isSandbox) "LATIHAN SANDBOX" else "REAL MEXC",
+                                            color = if (botState.isSandbox) Color(0xFF93C5FD) else Color(0xFFFCA5A5),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (botState.isGeminiThinking) "🧠 Gemini sedang menganalisis pasar..."
+                                           else if (botState.isRunning) "🟢 Bot aktif mencari profit di ${uiState.selectedAsset.symbol}"
+                                           else "⚪ Standby • Tekan untuk kontrol bot",
+                                    color = if (botState.isGeminiThinking) Color(0xFFA5B4FC) else if (botState.isRunning) BullGreen else TextMuted,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        // Status / Action Pill
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (botState.isRunning) BullGreen.copy(alpha = 0.15f) else Ema9Cyan.copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (botState.isRunning) BullGreen.copy(alpha = 0.5f) else Ema9Cyan.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Text(
+                                text = if (botState.isRunning) "KONTROL BOT (AKTIF)" else "BUKA KONTROL BOT",
+                                color = if (botState.isRunning) BullGreen else Ema9Cyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // If active position, display live summary inside card
+                    val activePos = botState.activePosition
+                    if (activePos != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(SurfaceDark)
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Posisi Terbuka: ${activePos.symbol} ($${String.format(Locale.US, "%,.2f", activePos.entryPrice)})",
+                                color = TextPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = (if (activePos.unrealizedPnl >= 0) "+$" else "-$") +
+                                        String.format(Locale.US, "%,.2f", kotlin.math.abs(activePos.unrealizedPnl)) +
+                                        " (${String.format(Locale.US, "%+.2f%%", activePos.unrealizedPnlPct)})",
+                                color = if (activePos.unrealizedPnl >= 0) BullGreen else BearRed,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+            }
+
             // AI Technical Analysis Card (Gemini Multimodal Vision)
             AiAnalysisCard(
                 asset = uiState.selectedAsset,
@@ -600,6 +756,36 @@ fun MainScreen(viewModel: MarketViewModel) {
                     showSearchDialog = false
                     viewModel.clearSearchResults()
                 }
+            )
+        }
+
+        // MEXC AutoTrading Bot & Sandbox Backtest Dialog
+        if (showBotDialog) {
+            TradingBotDialog(
+                botState = botState,
+                currentSymbol = uiState.selectedAsset.symbol,
+                currentPrice = uiState.selectedAsset.currentPrice,
+                candles = uiState.candles,
+                backtestReport = backtestReport,
+                isBacktesting = isBacktesting,
+                onDismiss = { showBotDialog = false },
+                onStartBot = { viewModel.tradingBotManager.startBot() },
+                onStopBot = { viewModel.tradingBotManager.stopBot() },
+                onToggleSandbox = { viewModel.tradingBotManager.setSandboxMode(it) },
+                onSaveCredentials = { key, sec -> viewModel.tradingBotManager.setCredentials(key, sec) },
+                onTestMexcConnection = { viewModel.tradingBotManager.testMexcConnection() },
+                onSendMexcTestOrder = { sym -> viewModel.tradingBotManager.sendQuickMexcTestOrder(sym) },
+                onSelectStrategy = { st -> viewModel.tradingBotManager.setStrategy(st) },
+                onSaveRiskParameters = { alloc, sl, tp, tr ->
+                    viewModel.tradingBotManager.updateRiskParameters(alloc, sl, tp, tr)
+                },
+                onRunBacktest = { sym, tf, lim -> viewModel.runMexcBacktest(sym, tf, lim) },
+                onManualClosePosition = { viewModel.tradingBotManager.manualClosePosition() },
+                onResetSandboxBalance = { viewModel.tradingBotManager.resetSandboxBalance() },
+                onClearHistory = { viewModel.tradingBotManager.clearTradeHistory() },
+                onExecuteGeminiTrader = { viewModel.executeGeminiTraderNow() },
+                onExecuteInstantBuy = { viewModel.executeInstantBuyNow() },
+                onSaveGeminiKey = { key -> viewModel.updateGeminiApiKey(key) }
             )
         }
     }

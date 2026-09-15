@@ -63,7 +63,12 @@ import com.example.ui.theme.ChartGridLine
 import com.example.ui.theme.CrosshairLine
 import com.example.ui.theme.Ema21Orange
 import com.example.ui.theme.Ema9Cyan
+import com.example.ui.theme.PivotAmber
+import com.example.ui.theme.ResistanceRed
 import com.example.ui.theme.RsiPurple
+import com.example.ui.theme.StochD
+import com.example.ui.theme.StochK
+import com.example.ui.theme.SupportGreen
 import com.example.ui.theme.SurfaceCard
 import com.example.ui.theme.SurfaceCardBorder
 import com.example.ui.theme.SurfaceDark
@@ -80,7 +85,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class SubChartType {
-    RSI, MACD, VOLUME, NONE
+    RSI, MACD, STOCHASTIC, ATR, VOLUME, NONE
 }
 
 @Composable
@@ -111,6 +116,7 @@ fun InteractiveCandlestickChart(
     // Interactive State
     var showEma by remember { mutableStateOf(true) }
     var showBollinger by remember { mutableStateOf(false) }
+    var showSupportResistance by remember { mutableStateOf(true) }
     var subChart by remember { mutableStateOf(SubChartType.RSI) }
     var isFullscreen by remember { mutableStateOf(false) }
 
@@ -136,7 +142,7 @@ fun InteractiveCandlestickChart(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: Indicator Toggles (EMA, Bollinger)
+            // Left: Indicator Toggles (EMA, Bollinger, Support/Resistance)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(
                     onClick = { showEma = !showEma },
@@ -149,11 +155,11 @@ fun InteractiveCandlestickChart(
                     modifier = Modifier.testTag("toggle_ema")
                 ) {
                     Text(
-                        text = "EMA 9/21",
+                        text = "EMA",
                         color = if (showEma) Ema9Cyan else TextSecondary,
                         fontSize = 11.sp,
                         fontWeight = if (showEma) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
                     )
                 }
 
@@ -172,12 +178,31 @@ fun InteractiveCandlestickChart(
                         color = if (showBollinger) BollingerLine else TextSecondary,
                         fontSize = 11.sp,
                         fontWeight = if (showBollinger) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                    )
+                }
+
+                Surface(
+                    onClick = { showSupportResistance = !showSupportResistance },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (showSupportResistance) SupportGreen.copy(alpha = 0.2f) else SurfaceCard,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (showSupportResistance) SupportGreen else SurfaceCardBorder
+                    ),
+                    modifier = Modifier.testTag("toggle_sr")
+                ) {
+                    Text(
+                        text = "S/R",
+                        color = if (showSupportResistance) SupportGreen else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = if (showSupportResistance) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
                     )
                 }
             }
 
-            // Right: Subchart Selector (RSI / MACD / VOL / OFF) + Zoom Controls
+            // Right: Subchart Selector (RSI / MACD / STOCH / ATR / VOL / OFF) + Zoom Controls
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -185,6 +210,8 @@ fun InteractiveCandlestickChart(
                 listOf(
                     SubChartType.RSI to "RSI",
                     SubChartType.MACD to "MACD",
+                    SubChartType.STOCHASTIC to "STOCH",
+                    SubChartType.ATR to "ATR",
                     SubChartType.VOLUME to "VOL",
                     SubChartType.NONE to "OFF"
                 ).forEach { (type, label) ->
@@ -584,6 +611,60 @@ fun InteractiveCandlestickChart(
                     if (ema21Init) drawPath(path = ema21Path, color = Ema21Orange, style = Stroke(width = 2f))
                 }
 
+                // Support & Resistance Price Levels with labels
+                if (showSupportResistance) {
+                    val r1Y = priceToY(indicators.resistanceLevel1)
+                    val s1Y = priceToY(indicators.supportLevel1)
+                    val pvY = priceToY(indicators.pivotPoint)
+
+                    if (r1Y in 0f..mainChartHeight) {
+                        drawLine(
+                            color = ResistanceRed.copy(alpha = 0.5f),
+                            start = Offset(0f, r1Y),
+                            end = Offset(mainPlotWidth, r1Y),
+                            strokeWidth = 1.2f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
+                        )
+                        drawContext.canvas.nativeCanvas.drawText("R1", 10f, r1Y - 4f, android.graphics.Paint().apply {
+                            color = android.graphics.Color.parseColor("#FF3D57")
+                            textSize = 18f
+                            isFakeBoldText = true
+                            isAntiAlias = true
+                        })
+                    }
+
+                    if (s1Y in 0f..mainChartHeight) {
+                        drawLine(
+                            color = SupportGreen.copy(alpha = 0.5f),
+                            start = Offset(0f, s1Y),
+                            end = Offset(mainPlotWidth, s1Y),
+                            strokeWidth = 1.2f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
+                        )
+                        drawContext.canvas.nativeCanvas.drawText("S1", 10f, s1Y - 4f, android.graphics.Paint().apply {
+                            color = android.graphics.Color.parseColor("#00E676")
+                            textSize = 18f
+                            isFakeBoldText = true
+                            isAntiAlias = true
+                        })
+                    }
+
+                    if (pvY in 0f..mainChartHeight) {
+                        drawLine(
+                            color = PivotAmber.copy(alpha = 0.4f),
+                            start = Offset(0f, pvY),
+                            end = Offset(mainPlotWidth, pvY),
+                            strokeWidth = 1f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f))
+                        )
+                        drawContext.canvas.nativeCanvas.drawText("PV", 10f, pvY - 4f, android.graphics.Paint().apply {
+                            color = android.graphics.Color.parseColor("#FFD600")
+                            textSize = 18f
+                            isAntiAlias = true
+                        })
+                    }
+                }
+
                 // Current Price Live Line & Highlight Badge on Price Scale
                 val lastClosePrice = visibleCandles.last().close
                 val currentY = priceToY(lastClosePrice)
@@ -765,6 +846,100 @@ fun InteractiveCandlestickChart(
                                 isAntiAlias = true
                             })
                         }
+                        SubChartType.STOCHASTIC -> {
+                            fun stochY(v: Double): Float {
+                                val clamped = v.coerceIn(0.0, 100.0)
+                                return (subBottom - ((clamped / 100.0) * subHeight)).toFloat()
+                            }
+                            val y80 = stochY(80.0)
+                            val y20 = stochY(20.0)
+
+                            drawRect(
+                                color = Ema9Cyan.copy(alpha = 0.05f),
+                                topLeft = Offset(0f, y80),
+                                size = Size(mainPlotWidth, y20 - y80)
+                            )
+                            drawLine(color = ChartGridLine, start = Offset(0f, y80), end = Offset(mainPlotWidth, y80), strokeWidth = 1f)
+                            drawLine(color = ChartGridLine, start = Offset(0f, y20), end = Offset(mainPlotWidth, y20), strokeWidth = 1f)
+
+                            val kPath = Path()
+                            val dPath = Path()
+                            var kInit = false
+                            var dInit = false
+
+                            for (i in visibleCandles.indices) {
+                                val globalIndex = startIdx + i
+                                val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                indicators.stochastic.getOrNull(globalIndex)?.let { pt ->
+                                    val ky = stochY(pt.k)
+                                    val dy = stochY(pt.d)
+                                    if (!kInit) {
+                                        kPath.moveTo(x, ky)
+                                        kInit = true
+                                    } else {
+                                        kPath.lineTo(x, ky)
+                                    }
+                                    if (!dInit) {
+                                        dPath.moveTo(x, dy)
+                                        dInit = true
+                                    } else {
+                                        dPath.lineTo(x, dy)
+                                    }
+                                }
+                            }
+                            if (kInit) drawPath(path = kPath, color = StochK, style = Stroke(width = 2f))
+                            if (dInit) drawPath(path = dPath, color = StochD, style = Stroke(width = 1.5f))
+
+                            val curStoch = indicators.currentStochastic
+                            val stochLabel = if (curStoch != null) {
+                                String.format(Locale.US, "%%K: %.1f  %%D: %.1f", curStoch.k, curStoch.d)
+                            } else {
+                                "Stoch(14,3)"
+                            }
+                            drawContext.canvas.nativeCanvas.drawText("STOCH(14,3): $stochLabel", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#00E5FF")
+                                textSize = 22f
+                                isAntiAlias = true
+                            })
+                        }
+                        SubChartType.ATR -> {
+                            val visibleAtrs = visibleCandles.indices.mapNotNull { i ->
+                                indicators.atr14.getOrNull(startIdx + i)
+                            }
+                            val maxAtr = visibleAtrs.maxOrNull() ?: 1.0
+                            val minAtr = visibleAtrs.minOrNull() ?: 0.0
+                            val atrRange = (maxAtr - minAtr).coerceAtLeast(0.00001)
+
+                            fun atrToY(v: Double): Float {
+                                val norm = ((v - minAtr) / atrRange).coerceIn(0.0, 1.0)
+                                return (subBottom - (norm * subHeight * 0.8f) - (subHeight * 0.1f)).toFloat()
+                            }
+
+                            val atrPath = Path()
+                            var atrInit = false
+                            for (i in visibleCandles.indices) {
+                                val globalIndex = startIdx + i
+                                val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                indicators.atr14.getOrNull(globalIndex)?.let { aVal ->
+                                    val ay = atrToY(aVal)
+                                    if (!atrInit) {
+                                        atrPath.moveTo(x, ay)
+                                        atrInit = true
+                                    } else {
+                                        atrPath.lineTo(x, ay)
+                                    }
+                                }
+                            }
+                            if (atrInit) {
+                                drawPath(path = atrPath, color = WarningGold, style = Stroke(width = 2f))
+                            }
+                            val curAtr = indicators.currentAtr?.let { String.format(Locale.US, "%,.${asset.decimals}f", it) } ?: "--"
+                            drawContext.canvas.nativeCanvas.drawText("ATR(14 Volatility): $curAtr", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#FFD600")
+                                textSize = 22f
+                                isAntiAlias = true
+                            })
+                        }
                         SubChartType.VOLUME -> {
                             val maxVol = visibleCandles.maxOfOrNull { it.volume } ?: 1.0
                             for (i in visibleCandles.indices) {
@@ -843,6 +1018,7 @@ private fun FullScreenCandlestickChartDialog(
 ) {
     var showEma by remember { mutableStateOf(true) }
     var showBollinger by remember { mutableStateOf(false) }
+    var showSupportResistance by remember { mutableStateOf(true) }
     var subChart by remember { mutableStateOf(SubChartType.RSI) }
 
     var candleSpacing by remember { mutableFloatStateOf(18f) }
@@ -931,10 +1107,28 @@ private fun FullScreenCandlestickChartDialog(
                         )
                     }
 
+                    // S/R Toggle
+                    Surface(
+                        onClick = { showSupportResistance = !showSupportResistance },
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (showSupportResistance) SupportGreen.copy(alpha = 0.2f) else SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (showSupportResistance) SupportGreen else SurfaceCardBorder)
+                    ) {
+                        Text(
+                            text = "S/R",
+                            color = if (showSupportResistance) SupportGreen else TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
+                    }
+
                     // Subcharts
                     listOf(
                         SubChartType.RSI to "RSI",
                         SubChartType.MACD to "MACD",
+                        SubChartType.STOCHASTIC to "STOCH",
+                        SubChartType.ATR to "ATR",
                         SubChartType.VOLUME to "VOL",
                         SubChartType.NONE to "OFF"
                     ).forEach { (type, label) ->
@@ -1268,6 +1462,99 @@ private fun FullScreenCandlestickChartDialog(
                         if (ema21Init) drawPath(path = ema21Path, color = Ema21Orange, style = Stroke(width = 2f))
                     }
 
+                    // Support & Resistance Lines on Fullscreen Canvas
+                    if (showSupportResistance) {
+                        val r1Y = priceToY(indicators.resistanceLevel1)
+                        val s1Y = priceToY(indicators.supportLevel1)
+                        val pvY = priceToY(indicators.pivotPoint)
+
+                        if (r1Y in 0f..mainChartHeight) {
+                            drawLine(
+                                color = ResistanceRed.copy(alpha = 0.5f),
+                                start = Offset(0f, r1Y),
+                                end = Offset(mainPlotWidth, r1Y),
+                                strokeWidth = 1.2f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
+                            )
+                            drawContext.canvas.nativeCanvas.drawText("R1", 10f, r1Y - 4f, android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#FF3D57")
+                                textSize = 20f
+                                isFakeBoldText = true
+                                isAntiAlias = true
+                            })
+                        }
+
+                        if (s1Y in 0f..mainChartHeight) {
+                            drawLine(
+                                color = SupportGreen.copy(alpha = 0.5f),
+                                start = Offset(0f, s1Y),
+                                end = Offset(mainPlotWidth, s1Y),
+                                strokeWidth = 1.2f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
+                            )
+                            drawContext.canvas.nativeCanvas.drawText("S1", 10f, s1Y - 4f, android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#00E676")
+                                textSize = 20f
+                                isFakeBoldText = true
+                                isAntiAlias = true
+                            })
+                        }
+
+                        if (pvY in 0f..mainChartHeight) {
+                            drawLine(
+                                color = PivotAmber.copy(alpha = 0.4f),
+                                start = Offset(0f, pvY),
+                                end = Offset(mainPlotWidth, pvY),
+                                strokeWidth = 1f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f))
+                            )
+                            drawContext.canvas.nativeCanvas.drawText("PV", 10f, pvY - 4f, android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor("#FFD600")
+                                textSize = 20f
+                                isAntiAlias = true
+                            })
+                        }
+                    }
+
+                    // Live Current Price Line & Badge in Fullscreen
+                    val lastClosePrice = visibleCandles.last().close
+                    val currentY = priceToY(lastClosePrice)
+                    val isBullPrice = asset.change24h >= 0
+                    val liveBadgeColor = if (isBullPrice) android.graphics.Color.parseColor("#00E676") else android.graphics.Color.parseColor("#FF3D57")
+
+                    drawLine(
+                        color = if (isBullPrice) BullGreen else BearRed,
+                        start = Offset(0f, currentY),
+                        end = Offset(mainPlotWidth, currentY),
+                        strokeWidth = 1.2f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
+                    )
+
+                    drawContext.canvas.nativeCanvas.drawRoundRect(
+                        mainPlotWidth + 3f,
+                        currentY - 13f,
+                        canvasWidth - 2f,
+                        currentY + 13f,
+                        6f,
+                        6f,
+                        android.graphics.Paint().apply {
+                            color = liveBadgeColor
+                            style = android.graphics.Paint.Style.FILL
+                            isAntiAlias = true
+                        }
+                    )
+                    drawContext.canvas.nativeCanvas.drawText(
+                        String.format(Locale.US, "%,.${asset.decimals}f", lastClosePrice),
+                        mainPlotWidth + 6f,
+                        currentY + 5f,
+                        android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            textSize = 20f
+                            isFakeBoldText = true
+                            isAntiAlias = true
+                        }
+                    )
+
                     // Crosshair overlay
                     crosshairCandleIndex?.let { cIdx ->
                         val localIdx = cIdx - startIdx
@@ -1389,6 +1676,100 @@ private fun FullScreenCandlestickChartDialog(
                                 }
                                 drawContext.canvas.nativeCanvas.drawText("MACD(12,26,9)", 10f, subTop + 22f, android.graphics.Paint().apply {
                                     color = android.graphics.Color.parseColor("#2979FF")
+                                    textSize = 22f
+                                    isAntiAlias = true
+                                })
+                            }
+                            SubChartType.STOCHASTIC -> {
+                                fun stochY(v: Double): Float {
+                                    val clamped = v.coerceIn(0.0, 100.0)
+                                    return (subBottom - ((clamped / 100.0) * subHeight)).toFloat()
+                                }
+                                val y80 = stochY(80.0)
+                                val y20 = stochY(20.0)
+
+                                drawRect(
+                                    color = Ema9Cyan.copy(alpha = 0.05f),
+                                    topLeft = Offset(0f, y80),
+                                    size = Size(mainPlotWidth, y20 - y80)
+                                )
+                                drawLine(color = ChartGridLine, start = Offset(0f, y80), end = Offset(mainPlotWidth, y80), strokeWidth = 1f)
+                                drawLine(color = ChartGridLine, start = Offset(0f, y20), end = Offset(mainPlotWidth, y20), strokeWidth = 1f)
+
+                                val kPath = Path()
+                                val dPath = Path()
+                                var kInit = false
+                                var dInit = false
+
+                                for (i in visibleCandles.indices) {
+                                    val globalIndex = startIdx + i
+                                    val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                    indicators.stochastic.getOrNull(globalIndex)?.let { pt ->
+                                        val ky = stochY(pt.k)
+                                        val dy = stochY(pt.d)
+                                        if (!kInit) {
+                                            kPath.moveTo(x, ky)
+                                            kInit = true
+                                        } else {
+                                            kPath.lineTo(x, ky)
+                                        }
+                                        if (!dInit) {
+                                            dPath.moveTo(x, dy)
+                                            dInit = true
+                                        } else {
+                                            dPath.lineTo(x, dy)
+                                        }
+                                    }
+                                }
+                                if (kInit) drawPath(path = kPath, color = StochK, style = Stroke(width = 2f))
+                                if (dInit) drawPath(path = dPath, color = StochD, style = Stroke(width = 1.5f))
+
+                                val curStoch = indicators.currentStochastic
+                                val stochLabel = if (curStoch != null) {
+                                    String.format(Locale.US, "%%K: %.1f  %%D: %.1f", curStoch.k, curStoch.d)
+                                } else {
+                                    "Stoch(14,3)"
+                                }
+                                drawContext.canvas.nativeCanvas.drawText("STOCH(14,3): $stochLabel", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#00E5FF")
+                                    textSize = 22f
+                                    isAntiAlias = true
+                                })
+                            }
+                            SubChartType.ATR -> {
+                                val visibleAtrs = visibleCandles.indices.mapNotNull { i ->
+                                    indicators.atr14.getOrNull(startIdx + i)
+                                }
+                                val maxAtr = visibleAtrs.maxOrNull() ?: 1.0
+                                val minAtr = visibleAtrs.minOrNull() ?: 0.0
+                                val atrRange = (maxAtr - minAtr).coerceAtLeast(0.00001)
+
+                                fun atrToY(v: Double): Float {
+                                    val norm = ((v - minAtr) / atrRange).coerceIn(0.0, 1.0)
+                                    return (subBottom - (norm * subHeight * 0.8f) - (subHeight * 0.1f)).toFloat()
+                                }
+
+                                val atrPath = Path()
+                                var atrInit = false
+                                for (i in visibleCandles.indices) {
+                                    val globalIndex = startIdx + i
+                                    val x = (i * candleSpacing) + (candleSpacing / 2f)
+                                    indicators.atr14.getOrNull(globalIndex)?.let { aVal ->
+                                        val ay = atrToY(aVal)
+                                        if (!atrInit) {
+                                            atrPath.moveTo(x, ay)
+                                            atrInit = true
+                                        } else {
+                                            atrPath.lineTo(x, ay)
+                                        }
+                                    }
+                                }
+                                if (atrInit) {
+                                    drawPath(path = atrPath, color = WarningGold, style = Stroke(width = 2f))
+                                }
+                                val curAtr = indicators.currentAtr?.let { String.format(Locale.US, "%,.${asset.decimals}f", it) } ?: "--"
+                                drawContext.canvas.nativeCanvas.drawText("ATR(14 Volatility): $curAtr", 10f, subTop + 22f, android.graphics.Paint().apply {
+                                    color = android.graphics.Color.parseColor("#FFD600")
                                     textSize = 22f
                                     isAntiAlias = true
                                 })

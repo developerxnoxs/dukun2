@@ -1,6 +1,6 @@
 {
   "name": "MarketAI",
-  "description": "Aplikasi analisis teknikal Forex \u0026 Crypto cerdas dengan chart candlestick interaktif, indikator teknikal otomatis (EMA, RSI, MACD, Bollinger Bands), notifikasi sinyal harga real-time, dan rekomendasi trading otomatis berbasis AI Gemini.",
+  "description": "Platform analisis teknikal Forex & Crypto dengan Gemini Autonomous AI Trader dan bot autotrading MEXC API nyata (Sandbox demo backtest & real live trading) dengan manajemen risiko kuantitatif.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

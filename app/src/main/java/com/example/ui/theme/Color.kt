@@ -25,6 +25,11 @@ val BollingerLine = Color(0xFF64B5F6)
 val RsiPurple = Color(0xFFE040FB)
 val MacdBlue = Color(0xFF2979FF)
 val WarningGold = Color(0xFFFFD600)
+val StochK = Color(0xFF00E5FF)
+val StochD = Color(0xFFFF9100)
+val SupportGreen = Color(0xFF00E676)
+val ResistanceRed = Color(0xFFFF3D57)
+val PivotAmber = Color(0xFFFFD600)
 
 // Typography & Grid
 val TextPrimary = Color(0xFFF1F5F9)
