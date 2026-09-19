@@ -105,6 +105,105 @@ class MexcApiClient(
     }
 
     /**
+     * Fetch 24-hour ticker price change statistics for all symbols or USDT pairs on MEXC
+     * GET /api/v3/ticker/24hr
+     */
+    suspend fun get24hTickers(): Result<List<Mexc24hTicker>> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/v3/ticker/24hr")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val array = JSONArray(body)
+                    val resultList = mutableListOf<Mexc24hTicker>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val sym = obj.optString("symbol")
+                        if (sym.endsWith("USDT")) {
+                            val lastPrice = obj.optString("lastPrice", "0").toDoubleOrNull() ?: 0.0
+                            val priceChange = obj.optString("priceChange", "0").toDoubleOrNull() ?: 0.0
+                            val priceChangePercent = obj.optString("priceChangePercent", "0").toDoubleOrNull() ?: 0.0
+                            val highPrice = obj.optString("highPrice", "0").toDoubleOrNull() ?: 0.0
+                            val lowPrice = obj.optString("lowPrice", "0").toDoubleOrNull() ?: 0.0
+                            val volume = obj.optString("volume", "0").toDoubleOrNull() ?: 0.0
+                            val quoteVolume = obj.optString("quoteVolume", "0").toDoubleOrNull() ?: 0.0
+
+                            // Filter out inactive zero-volume pairs
+                            if (quoteVolume > 10_000.0 && lastPrice > 0.0) {
+                                resultList.add(
+                                    Mexc24hTicker(
+                                        symbol = sym,
+                                        priceChange = priceChange,
+                                        priceChangePercent = priceChangePercent,
+                                        lastPrice = lastPrice,
+                                        highPrice = highPrice,
+                                        lowPrice = lowPrice,
+                                        volume = volume,
+                                        quoteVolume = quoteVolume
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    // Sort primarily by highest USDT quote volume
+                    resultList.sortByDescending { it.quoteVolume }
+                    Result.success(resultList)
+                } else {
+                    Result.failure(IOException("Failed to fetch 24h tickers from MEXC: HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetch single 24h ticker for a specific symbol
+     */
+    suspend fun getSingle24hTicker(symbol: String): Result<Mexc24hTicker> = withContext(Dispatchers.IO) {
+        try {
+            val cleanSymbol = symbol.replace("/", "").replace(":", "").uppercase()
+            val request = Request.Builder()
+                .url("$BASE_URL/api/v3/ticker/24hr?symbol=$cleanSymbol")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val obj = JSONObject(body)
+                    val lastPrice = obj.optString("lastPrice", "0").toDoubleOrNull() ?: 0.0
+                    val priceChange = obj.optString("priceChange", "0").toDoubleOrNull() ?: 0.0
+                    val priceChangePercent = obj.optString("priceChangePercent", "0").toDoubleOrNull() ?: 0.0
+                    val highPrice = obj.optString("highPrice", "0").toDoubleOrNull() ?: 0.0
+                    val lowPrice = obj.optString("lowPrice", "0").toDoubleOrNull() ?: 0.0
+                    val volume = obj.optString("volume", "0").toDoubleOrNull() ?: 0.0
+                    val quoteVolume = obj.optString("quoteVolume", "0").toDoubleOrNull() ?: 0.0
+
+                    Result.success(
+                        Mexc24hTicker(
+                            symbol = cleanSymbol,
+                            priceChange = priceChange,
+                            priceChangePercent = priceChangePercent,
+                            lastPrice = lastPrice,
+                            highPrice = highPrice,
+                            lowPrice = lowPrice,
+                            volume = volume,
+                            quoteVolume = quoteVolume
+                        )
+                    )
+                } else {
+                    Result.failure(IOException("Failed to fetch 24h ticker for $cleanSymbol: HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Fetch historical Klines from MEXC API (GET /api/v3/klines)
      * Format: [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume]
      */

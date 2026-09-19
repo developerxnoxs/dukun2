@@ -6,6 +6,8 @@ import com.example.data.gemini.GeminiTraderClient
 import com.example.data.gemini.GeminiTraderDecision
 import com.example.data.local.AppDatabase
 import com.example.data.local.BotTradeEntity
+import com.example.data.mexc.AiCoinSelectionResult
+import com.example.data.mexc.Mexc24hTicker
 import com.example.data.mexc.MexcApiClient
 import com.example.data.model.CandleStick
 import com.example.data.model.SignalAction
@@ -67,14 +69,22 @@ data class BotUiState(
     val lastGeminiThesis: String = "",
     val lastGeminiConfidence: Double = 0.0,
     val isLiveGeminiResponse: Boolean = false,
-    val activeBlueprint: GeminiTradeBlueprint? = null
+    val activeBlueprint: GeminiTradeBlueprint? = null,
+    // MEXC Coin Screener & AI Selection state
+    val selectedCoinSymbol: String = "BTCUSDT",
+    val aiRecommendedCoin: AiCoinSelectionResult? = null,
+    val isScanningCoins: Boolean = false,
+    val coinScreenerResults: Map<CoinScreenCategory, List<Mexc24hTicker>> = emptyMap(),
+    val screenerErrorMessage: String? = null,
+    val selectedScreenerCategory: CoinScreenCategory = CoinScreenCategory.TOP_VOLUME
 )
 
 class TradingBotManager(
     private val context: Context,
     private val mexcApiClient: MexcApiClient = MexcApiClient(),
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
-    private val geminiTraderClient: GeminiTraderClient = GeminiTraderClient()
+    private val geminiTraderClient: GeminiTraderClient = GeminiTraderClient(),
+    private val mexcCoinScreener: MexcCoinScreener = MexcCoinScreener(mexcApiClient)
 ) {
     private val prefs = context.getSharedPreferences("mexc_autobot_prefs", Context.MODE_PRIVATE)
     private val db = AppDatabase.getDatabase(context)
@@ -339,6 +349,16 @@ class TradingBotManager(
                 newTrailingStop = max(newTrailingStop, calculatedTrailing)
             }
 
+            // Break-Even Protection:
+            // Bila keuntungan mengambang mencapai >= 1.2%, naikkan Stop Loss ke harga entri + 0.2%
+            var effectiveStopLoss = position.stopLossPrice
+            if (unrealizedPnlPct >= 1.2) {
+                val breakEvenPrice = position.entryPrice * 1.002
+                if (breakEvenPrice > effectiveStopLoss) {
+                    effectiveStopLoss = breakEvenPrice
+                }
+            }
+
             // Check Exits
             var shouldClose = false
             var closeReason = ""
@@ -349,9 +369,13 @@ class TradingBotManager(
             } else if (currentPrice <= newTrailingStop && profitFromHighPct >= 1.5) {
                 shouldClose = true
                 closeReason = "TRAILING_STOP_HIT (Terkunci +${"%.2f".format(unrealizedPnlPct)}%)"
-            } else if (currentPrice <= position.stopLossPrice) {
+            } else if (currentPrice <= effectiveStopLoss) {
                 shouldClose = true
-                closeReason = "STOP_LOSS_HIT (-${"%.2f".format(unrealizedPnlPct)}%)"
+                closeReason = if (effectiveStopLoss > position.entryPrice) {
+                    "BREAK_EVEN_STOP_HIT (+${"%.2f".format(unrealizedPnlPct)}%)"
+                } else {
+                    "STOP_LOSS_HIT (-${"%.2f".format(unrealizedPnlPct)}%)"
+                }
             } else {
                 // Check strategy sell signal
                 val decision = BotStrategyEngine.evaluate(
@@ -831,6 +855,99 @@ class TradingBotManager(
             logTerminal("🗑️ Riwayat trading dihapus untuk mode saat ini")
         }
     }
+
+    /**
+     * Fetch real 24h ticker data from MEXC API and categorize into screener lists
+     */
+    fun refreshCoinScreener() {
+        scope.launch {
+            _botState.update { it.copy(isScanningCoins = true, screenerErrorMessage = null) }
+            logTerminal("🔍 [MEXC SCREENER] Memuat data 24 jam real-time dari bursa MEXC...")
+            val result = mexcCoinScreener.getCategorizedCoins()
+            if (result.isSuccess) {
+                val categorized = result.getOrThrow()
+                _botState.update {
+                    it.copy(
+                        isScanningCoins = false,
+                        coinScreenerResults = categorized,
+                        screenerErrorMessage = null
+                    )
+                }
+                logTerminal("✅ [MEXC SCREENER] Berhasil memuat ${categorized.values.sumOf { it.size }} koin USDT aktif dari MEXC API")
+                // Run automatic initial AI evaluation on top liquid coins
+                val topVolume = categorized[CoinScreenCategory.TOP_VOLUME].orEmpty()
+                if (topVolume.isNotEmpty() && _botState.value.aiRecommendedCoin == null) {
+                    runAiCoinSelection(CoinScreenCategory.TOP_VOLUME)
+                }
+            } else {
+                val err = result.exceptionOrNull()?.message ?: "Gagal memuat koin dari MEXC"
+                _botState.update {
+                    it.copy(
+                        isScanningCoins = false,
+                        screenerErrorMessage = err
+                    )
+                }
+                logTerminal("⚠️ [MEXC SCREENER ERROR] $err")
+            }
+        }
+    }
+
+    /**
+     * Gemini AI Autonomous Coin Selector:
+     * Dissects live market data from MEXC and picks the single highest-accuracy,
+     * most profitable coin with optimal Risk/Reward setup.
+     */
+    fun runAiCoinSelection(category: CoinScreenCategory = _botState.value.selectedScreenerCategory) {
+        scope.launch {
+            _botState.update { it.copy(isScanningCoins = true) }
+            logTerminal("🧠 [AI GEMINI SELECTOR] Menganalisis momentum & struktur pasar koin MEXC...")
+
+            val list = _botState.value.coinScreenerResults[category].orEmpty().ifEmpty {
+                val res = mexcCoinScreener.getCategorizedCoins()
+                if (res.isSuccess) {
+                    val map = res.getOrThrow()
+                    _botState.update { it.copy(coinScreenerResults = map) }
+                    map[category].orEmpty()
+                } else emptyList()
+            }
+
+            val aiResult = mexcCoinScreener.aiSelectBestCoinToTrade(
+                candidates = list,
+                customApiKey = _botState.value.customGeminiApiKey
+            )
+
+            _botState.update {
+                it.copy(
+                    isScanningCoins = false,
+                    aiRecommendedCoin = aiResult
+                )
+            }
+
+            val sourceTag = if (aiResult.isLiveGemini) "✨ [GEMINI 3.5 FLASH]" else "⚡ [ALGO QUANTITATIVE]"
+            logTerminal("$sourceTag Rekomendasi Koin Terbaik: ${aiResult.recommendedSymbol} (Akurasi: ${String.format(Locale.US, "%.0f%%", aiResult.confidence * 100)}) | Setup: ${aiResult.setupCategory} | R:R: TP +${aiResult.suggestedTpPct}% / SL -${aiResult.suggestedSlPct}%")
+            logTerminal("💡 Tesis AI: ${aiResult.thesis}")
+        }
+    }
+
+    /**
+     * Select a specific coin from the MEXC screener to trade
+     */
+    fun selectCoinForTrading(symbol: String, customTpPct: Double? = null, customSlPct: Double? = null) {
+        val cleanSym = symbol.uppercase(Locale.US)
+        _botState.update {
+            it.copy(
+                selectedCoinSymbol = cleanSym,
+                customTpPct = customTpPct ?: it.customTpPct,
+                customSlPct = customSlPct ?: it.customSlPct
+            )
+        }
+        logTerminal("🎯 [TARGET KOIN MEXC] Bot kini difokuskan pada $cleanSym")
+    }
+
+    fun setScreenerCategory(category: CoinScreenCategory) {
+        _botState.update { it.copy(selectedScreenerCategory = category) }
+    }
+
 
     private fun logTerminal(msg: String) {
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())

@@ -10,6 +10,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -67,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -126,6 +134,26 @@ fun MainScreen(viewModel: MarketViewModel) {
     var showSearchDialog by remember { mutableStateOf(false) }
     var showBotDialog by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("ALL") } // "ALL", "CRYPTO", "FOREX", "COMMODITY"
+
+    val infiniteTransition = rememberInfiniteTransition(label = "live_pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
 
     // Request Notification permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -195,15 +223,19 @@ fun MainScreen(viewModel: MarketViewModel) {
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.Circle,
-                                            contentDescription = null,
-                                            tint = BullGreen,
-                                            modifier = Modifier.size(6.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .graphicsLayer {
+                                                    scaleX = pulseScale
+                                                    scaleY = pulseScale
+                                                    alpha = pulseAlpha
+                                                }
+                                                .background(BullGreen, CircleShape)
                                         )
                                         Text(
-                                            text = "LIVE",
-                                            color = BullGreen,
+                                            text = if (uiState.isRefreshingPrice) "SYNC..." else "LIVE ${uiState.refreshCountdown}s",
+                                            color = if (uiState.isRefreshingPrice) Ema9Cyan else BullGreen,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -437,12 +469,25 @@ fun MainScreen(viewModel: MarketViewModel) {
 
                         // Right: Live Price & 24h Change Pill
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = String.format(Locale.US, "%,.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.currentPrice),
-                                color = TextPrimary,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .graphicsLayer {
+                                            alpha = pulseAlpha
+                                        }
+                                        .background(if (isBull) BullGreen else BearRed, CircleShape)
+                                )
+                                Text(
+                                    text = String.format(Locale.US, "%,.${uiState.selectedAsset.decimals}f", uiState.selectedAsset.currentPrice),
+                                    color = TextPrimary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                             Spacer(modifier = Modifier.height(2.dp))
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
@@ -785,7 +830,15 @@ fun MainScreen(viewModel: MarketViewModel) {
                 onClearHistory = { viewModel.tradingBotManager.clearTradeHistory() },
                 onExecuteGeminiTrader = { viewModel.executeGeminiTraderNow() },
                 onExecuteInstantBuy = { viewModel.executeInstantBuyNow() },
-                onSaveGeminiKey = { key -> viewModel.updateGeminiApiKey(key) }
+                onSaveGeminiKey = { key -> viewModel.updateGeminiApiKey(key) },
+                onRefreshScreener = { viewModel.tradingBotManager.refreshCoinScreener() },
+                onRunAiCoinSelection = { cat -> viewModel.tradingBotManager.runAiCoinSelection(cat) },
+                onSelectCoin = { ticker, tp, sl -> viewModel.selectMexcCoin(ticker, tp, sl) },
+                onSelectScreenerCategory = { cat -> viewModel.tradingBotManager.setScreenerCategory(cat) },
+                asset = uiState.selectedAsset,
+                indicators = uiState.indicators,
+                refreshCountdown = uiState.refreshCountdown,
+                isRefreshingPrice = uiState.isRefreshingPrice
             )
         }
     }

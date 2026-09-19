@@ -64,9 +64,9 @@ class GeminiTraderClient {
     }
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     suspend fun evaluateMarketForTrading(
@@ -83,23 +83,25 @@ class GeminiTraderClient {
         val apiKey = if (customApiKey.isNotBlank()) customApiKey.trim() else BuildConfig.GEMINI_API_KEY
         val isKeyValid = apiKey.isNotBlank() && !apiKey.contains("MY_GEMINI_API_KEY")
 
-        // 1. If currently in 429 rate limit cooldown, bypass network to avoid hammering API
+        // 1. Check rate limit: If manual click and cooldown is low, allow user to test API
         if (isCurrentlyRateLimited()) {
             val remainingSec = getRemainingCooldownSeconds()
-            return@withContext generateHeuristicTraderDecision(
-                symbol = symbol,
-                currentPrice = currentPrice,
-                candles = candles,
-                indicators = indicators,
-                currentPositionHeld = currentPositionHeld,
-                positionEntryPrice = positionEntryPrice,
-                unrealizedPnlPct = unrealizedPnlPct,
-                isLiveGemini = false,
-                notePrefix = "[Engine Kuantitatif - Gemini Limit 429]",
-                isRateLimited = true,
-                rateLimitRemainingSeconds = remainingSec,
-                forceManual = forceManual
-            )
+            if (!forceManual || remainingSec > 15L) {
+                return@withContext generateHeuristicTraderDecision(
+                    symbol = symbol,
+                    currentPrice = currentPrice,
+                    candles = candles,
+                    indicators = indicators,
+                    currentPositionHeld = currentPositionHeld,
+                    positionEntryPrice = positionEntryPrice,
+                    unrealizedPnlPct = unrealizedPnlPct,
+                    isLiveGemini = false,
+                    notePrefix = "[Engine Kuantitatif - Gemini Limit 429 (${remainingSec}s)]",
+                    isRateLimited = true,
+                    rateLimitRemainingSeconds = remainingSec,
+                    forceManual = forceManual
+                )
+            }
         }
 
         if (!isKeyValid) {
@@ -112,108 +114,116 @@ class GeminiTraderClient {
                 positionEntryPrice = positionEntryPrice,
                 unrealizedPnlPct = unrealizedPnlPct,
                 isLiveGemini = false,
-                notePrefix = "[Heuristic Quantitative Trader]",
+                notePrefix = "[Engine Kuantitatif - Masukkan Kunci Gemini di 'Akun & API']",
                 forceManual = forceManual
             )
         }
 
-        try {
-            val prompt = buildTraderPrompt(
-                symbol = symbol,
-                currentPrice = currentPrice,
-                candles = candles,
-                indicators = indicators,
-                currentPositionHeld = currentPositionHeld,
-                positionEntryPrice = positionEntryPrice,
-                unrealizedPnlPct = unrealizedPnlPct,
-                forceManual = forceManual
-            )
+        val prompt = buildTraderPrompt(
+            symbol = symbol,
+            currentPrice = currentPrice,
+            candles = candles,
+            indicators = indicators,
+            currentPositionHeld = currentPositionHeld,
+            positionEntryPrice = positionEntryPrice,
+            unrealizedPnlPct = unrealizedPnlPct,
+            forceManual = forceManual
+        )
 
-            val requestJson = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("text", prompt)
-                            })
-                        }
-                        put("parts", parts)
+        val requestJson = JSONObject().apply {
+            val contents = JSONArray().apply {
+                val contentObj = JSONObject().apply {
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", prompt)
+                        })
                     }
-                    put(contentObj)
+                    put("parts", parts)
                 }
-                put("contents", contents)
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", if (forceManual) 0.10 else 0.20)
-                    put("topP", 0.85)
+                put(contentObj)
+            }
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", if (forceManual) 0.10 else 0.15)
+                put("topP", 0.85)
+                put("responseMimeType", "application/json")
+                put("thinkingConfig", JSONObject().apply {
+                    put("thinkingBudget", 0)
                 })
-            }
-
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
-            val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val responseString = response.body?.string()
-
-            if (response.code == 429) {
-                // Rate limit triggered: enter 3-minute cooldown
-                markRateLimited(180L)
-                return@withContext generateHeuristicTraderDecision(
-                    symbol = symbol,
-                    currentPrice = currentPrice,
-                    candles = candles,
-                    indicators = indicators,
-                    currentPositionHeld = currentPositionHeld,
-                    positionEntryPrice = positionEntryPrice,
-                    unrealizedPnlPct = unrealizedPnlPct,
-                    isLiveGemini = false,
-                    notePrefix = "[Rate Limit 429 - Fallback Algo]",
-                    isRateLimited = true,
-                    rateLimitRemainingSeconds = 180L,
-                    forceManual = forceManual
-                )
-            }
-
-            if (!response.isSuccessful || responseString.isNullOrBlank()) {
-                return@withContext generateHeuristicTraderDecision(
-                    symbol = symbol,
-                    currentPrice = currentPrice,
-                    candles = candles,
-                    indicators = indicators,
-                    currentPositionHeld = currentPositionHeld,
-                    positionEntryPrice = positionEntryPrice,
-                    unrealizedPnlPct = unrealizedPnlPct,
-                    isLiveGemini = false,
-                    notePrefix = "[Fallback Trader - HTTP ${response.code}]",
-                    forceManual = forceManual
-                )
-            }
-
-            parseTraderResponse(responseString, currentPrice, indicators, forceManual)
-        } catch (e: Exception) {
-            val is429Exception = e.message?.contains("429") == true || e.message?.contains("RESOURCE_EXHAUSTED") == true
-            if (is429Exception) {
-                markRateLimited(180L)
-            }
-            generateHeuristicTraderDecision(
-                symbol = symbol,
-                currentPrice = currentPrice,
-                candles = candles,
-                indicators = indicators,
-                currentPositionHeld = currentPositionHeld,
-                positionEntryPrice = positionEntryPrice,
-                unrealizedPnlPct = unrealizedPnlPct,
-                isLiveGemini = false,
-                notePrefix = if (is429Exception) "[Rate Limit 429 - Fallback Algo]" else "[Fallback Trader - ${e.localizedMessage ?: "Error"}]",
-                isRateLimited = is429Exception,
-                rateLimitRemainingSeconds = if (is429Exception) 180L else 0L,
-                forceManual = forceManual
-            )
+            })
         }
+
+        val requestBodyString = requestJson.toString()
+        val models = listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-flash-latest")
+
+        for (model in models) {
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val requestBody = requestBodyString.toRequestBody("application/json".toMediaType())
+                val request = Request.Builder().url(url).post(requestBody).build()
+
+                val response = httpClient.newCall(request).execute()
+                val responseString = response.body?.string()
+
+                if (response.code == 429) {
+                    markRateLimited(45L)
+                    return@withContext generateHeuristicTraderDecision(
+                        symbol = symbol,
+                        currentPrice = currentPrice,
+                        candles = candles,
+                        indicators = indicators,
+                        currentPositionHeld = currentPositionHeld,
+                        positionEntryPrice = positionEntryPrice,
+                        unrealizedPnlPct = unrealizedPnlPct,
+                        isLiveGemini = false,
+                        notePrefix = "[Rate Limit 429 - Fallback Algo]",
+                        isRateLimited = true,
+                        rateLimitRemainingSeconds = 45L,
+                        forceManual = forceManual
+                    )
+                }
+
+                if (response.isSuccessful && !responseString.isNullOrBlank()) {
+                    val decision = parseTraderResponse(responseString, currentPrice, indicators, forceManual)
+                    if (decision != null) {
+                        return@withContext decision
+                    }
+                }
+            } catch (e: Exception) {
+                val is429Exception = e.message?.contains("429") == true || e.message?.contains("RESOURCE_EXHAUSTED") == true
+                if (is429Exception) {
+                    markRateLimited(45L)
+                    return@withContext generateHeuristicTraderDecision(
+                        symbol = symbol,
+                        currentPrice = currentPrice,
+                        candles = candles,
+                        indicators = indicators,
+                        currentPositionHeld = currentPositionHeld,
+                        positionEntryPrice = positionEntryPrice,
+                        unrealizedPnlPct = unrealizedPnlPct,
+                        isLiveGemini = false,
+                        notePrefix = "[Rate Limit 429 - Fallback Algo]",
+                        isRateLimited = true,
+                        rateLimitRemainingSeconds = 45L,
+                        forceManual = forceManual
+                    )
+                }
+            }
+        }
+
+        // All models failed or timed out: fall back to algorithmic engine
+        generateHeuristicTraderDecision(
+            symbol = symbol,
+            currentPrice = currentPrice,
+            candles = candles,
+            indicators = indicators,
+            currentPositionHeld = currentPositionHeld,
+            positionEntryPrice = positionEntryPrice,
+            unrealizedPnlPct = unrealizedPnlPct,
+            isLiveGemini = false,
+            notePrefix = "[Fallback Engine Kuantitatif]",
+            forceManual = forceManual
+        )
     }
 
     private fun buildTraderPrompt(
@@ -313,61 +323,76 @@ class GeminiTraderClient {
         currentPrice: Double,
         indicators: TechnicalIndicators,
         forceManual: Boolean = false
-    ): GeminiTraderDecision {
-        val root = JSONObject(rawJson)
-        val candidates = root.optJSONArray("candidates")
-        val content = candidates?.optJSONObject(0)?.optJSONObject("content")
-        val parts = content?.optJSONArray("parts")
-        val text = parts?.optJSONObject(0)?.optString("text") ?: ""
+    ): GeminiTraderDecision? {
+        return try {
+            val root = JSONObject(rawJson)
+            val candidates = root.optJSONArray("candidates")
+            val content = candidates?.optJSONObject(0)?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val textBuilder = StringBuilder()
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    val partObj = parts.optJSONObject(i)
+                    val t = partObj?.optString("text") ?: ""
+                    if (t.isNotEmpty()) textBuilder.append(t)
+                }
+            }
+            val text = textBuilder.toString()
 
-        val cleaned = text
-            .replace("```json", "")
-            .replace("```", "")
-            .trim()
+            val firstBrace = text.indexOf('{')
+            val lastBrace = text.lastIndexOf('}')
+            val jsonString = if (firstBrace != -1 && lastBrace > firstBrace) {
+                text.substring(firstBrace, lastBrace + 1)
+            } else {
+                text.replace("```json", "").replace("```", "").trim()
+            }
 
-        val json = JSONObject(cleaned)
-        val actionStr = json.optString("action", "NEUTRAL").uppercase(Locale.US)
-        val action = when {
-            actionStr.contains("BUY") -> SignalAction.BUY
-            actionStr.contains("SELL") -> SignalAction.SELL
-            else -> SignalAction.NEUTRAL
+            val json = JSONObject(jsonString)
+            val actionStr = json.optString("action", "NEUTRAL").uppercase(Locale.US)
+            val action = when {
+                actionStr.contains("BUY") -> SignalAction.BUY
+                actionStr.contains("SELL") -> SignalAction.SELL
+                else -> SignalAction.NEUTRAL
+            }
+
+            val rawConfidence = json.optInt("confidence", 75)
+            val confidence = (rawConfidence / 100.0).coerceIn(0.1, 0.99)
+            val shouldExecute = json.optBoolean("shouldExecute", (action != SignalAction.NEUTRAL && confidence >= 0.70) || (forceManual && action == SignalAction.BUY))
+
+            val atr = indicators.currentAtr ?: (currentPrice * 0.015)
+            val defaultSl = if (action == SignalAction.BUY) currentPrice - (1.5 * atr) else currentPrice + (1.5 * atr)
+            val defaultTp = if (action == SignalAction.BUY) currentPrice + (3.0 * atr) else currentPrice - (3.0 * atr)
+
+            val sl = json.optDouble("suggestedStopLoss", defaultSl).let { if (it > 0) it else defaultSl }
+            val tp = json.optDouble("suggestedTakeProfit", defaultTp).let { if (it > 0) it else defaultTp }
+            val entry = json.optDouble("suggestedEntry", currentPrice).let { if (it > 0) it else currentPrice }
+
+            val thesis = json.optString("tradeThesis", "Gemini AI Trader: Analisis momentum dan konfluensi pasar selesai.")
+            val risk = json.optString("riskWarning", "Batas risiko terkendali dengan Trailing Stop otomatis.")
+
+            val trigMin = json.optDouble("triggerMinPrice", if (action == SignalAction.BUY) currentPrice * 0.995 else 0.0)
+            val trigMax = json.optDouble("triggerMaxPrice", if (action == SignalAction.BUY) currentPrice * 1.005 else 0.0)
+            val trigCond = json.optString("triggerCondition", if (shouldExecute) "IMMEDIATE" else "PRICE_RETEST_OR_BREAKOUT")
+            val validityMin = json.optInt("planValidityMinutes", 20).coerceIn(5, 60)
+
+            GeminiTraderDecision(
+                action = action,
+                confidence = confidence,
+                shouldExecute = shouldExecute,
+                suggestedEntry = entry,
+                suggestedStopLoss = sl,
+                suggestedTakeProfit = tp,
+                tradeThesis = thesis,
+                riskWarning = risk,
+                isLiveGeminiResponse = true,
+                triggerMinPrice = if (trigMin > 0) trigMin else currentPrice,
+                triggerMaxPrice = if (trigMax > 0) trigMax else currentPrice,
+                triggerCondition = trigCond,
+                planValidityMinutes = validityMin
+            )
+        } catch (_: Exception) {
+            null
         }
-
-        val rawConfidence = json.optInt("confidence", 75)
-        val confidence = (rawConfidence / 100.0).coerceIn(0.1, 0.99)
-        val shouldExecute = json.optBoolean("shouldExecute", (action != SignalAction.NEUTRAL && confidence >= 0.70) || (forceManual && action == SignalAction.BUY))
-
-        val atr = indicators.currentAtr ?: (currentPrice * 0.015)
-        val defaultSl = if (action == SignalAction.BUY) currentPrice - (1.5 * atr) else currentPrice + (1.5 * atr)
-        val defaultTp = if (action == SignalAction.BUY) currentPrice + (3.0 * atr) else currentPrice - (3.0 * atr)
-
-        val sl = json.optDouble("suggestedStopLoss", defaultSl).let { if (it > 0) it else defaultSl }
-        val tp = json.optDouble("suggestedTakeProfit", defaultTp).let { if (it > 0) it else defaultTp }
-        val entry = json.optDouble("suggestedEntry", currentPrice).let { if (it > 0) it else currentPrice }
-
-        val thesis = json.optString("tradeThesis", "Gemini AI Trader: Analisis momentum dan konfluensi pasar selesai.")
-        val risk = json.optString("riskWarning", "Batas risiko terkendali dengan Trailing Stop otomatis.")
-
-        val trigMin = json.optDouble("triggerMinPrice", if (action == SignalAction.BUY) currentPrice * 0.995 else 0.0)
-        val trigMax = json.optDouble("triggerMaxPrice", if (action == SignalAction.BUY) currentPrice * 1.005 else 0.0)
-        val trigCond = json.optString("triggerCondition", if (shouldExecute) "IMMEDIATE" else "PRICE_RETEST_OR_BREAKOUT")
-        val validityMin = json.optInt("planValidityMinutes", 20).coerceIn(5, 60)
-
-        return GeminiTraderDecision(
-            action = action,
-            confidence = confidence,
-            shouldExecute = shouldExecute,
-            suggestedEntry = entry,
-            suggestedStopLoss = sl,
-            suggestedTakeProfit = tp,
-            tradeThesis = thesis,
-            riskWarning = risk,
-            isLiveGeminiResponse = true,
-            triggerMinPrice = if (trigMin > 0) trigMin else currentPrice,
-            triggerMaxPrice = if (trigMax > 0) trigMax else currentPrice,
-            triggerCondition = trigCond,
-            planValidityMinutes = validityMin
-        )
     }
 
     private fun generateHeuristicTraderDecision(

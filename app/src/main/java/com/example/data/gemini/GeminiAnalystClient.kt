@@ -36,85 +36,148 @@ class GeminiAnalystClient {
         timeframe: Timeframe,
         candles: List<CandleStick>,
         indicators: TechnicalIndicators,
-        chartBitmap: Bitmap
+        chartBitmap: Bitmap?,
+        customApiKey: String = ""
     ): AiAnalysisResult = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-
+        val apiKey = if (customApiKey.isNotBlank()) customApiKey.trim() else BuildConfig.GEMINI_API_KEY
         val isKeyValid = apiKey.isNotBlank() && !apiKey.contains("MY_GEMINI_API_KEY")
 
         if (!isKeyValid) {
             // Provide accurate algorithmic technical recommendation when API key is not yet set
             return@withContext generateHeuristicRecommendation(
                 asset, timeframe, candles, indicators,
-                note = "Analisis teknikal berbasis kalkulasi indikator real-time. (Tip: Masukkan GEMINI_API_KEY di panel Secrets AI Studio untuk analisis multi-modal neural Gemini langsung)"
+                note = "Analisis teknikal berbasis kalkulasi indikator real-time. (Tip: Masukkan Kunci Gemini API di menu Bot '⚙️ Akun & API' untuk analisis Gemini AI)"
             )
         }
 
-        try {
-            // 1. Convert Chart Bitmap to Base64 JPEG
-            val outputStream = ByteArrayOutputStream()
-            chartBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
-            val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+        val prompt = buildTechnicalPrompt(asset, timeframe, candles, indicators)
 
-            // 2. Build structured technical prompt
-            val prompt = buildTechnicalPrompt(asset, timeframe, candles, indicators)
+        // Tier 1: Try Multimodal Vision if chartBitmap is available
+        if (chartBitmap != null) {
+            val visionResult = tryCallGeminiVision(apiKey, prompt, chartBitmap, asset, indicators)
+            if (visionResult != null) {
+                return@withContext visionResult
+            }
+        }
 
-            // 3. Build REST Request Payload for Gemini Vision (gemini-3.5-flash)
-            val requestJson = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            // Text prompt part
-                            put(JSONObject().apply {
-                                put("text", prompt)
-                            })
-                            // Image part
-                            put(JSONObject().apply {
-                                put("inlineData", JSONObject().apply {
-                                    put("mimeType", "image/jpeg")
-                                    put("data", base64Image)
+        // Tier 2: Multimodal failed or unavailable, attempt Text-Only Gemini call before falling back to local algorithm
+        val textResult = tryCallGeminiText(apiKey, prompt, asset, indicators)
+        if (textResult != null) {
+            return@withContext textResult
+        }
+
+        // Tier 3: Fallback to quantitative algorithmic recommendation
+        generateHeuristicRecommendation(
+            asset, timeframe, candles, indicators,
+            note = "Fallback: Gemini API sementara tidak dapat dihubungi. Menggunakan analisis kuantitatif lokal."
+        )
+    }
+
+    private fun tryCallGeminiVision(
+        apiKey: String,
+        prompt: String,
+        chartBitmap: Bitmap,
+        asset: MarketAsset,
+        indicators: TechnicalIndicators
+    ): AiAnalysisResult? {
+        val models = listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-flash-latest")
+        for (model in models) {
+            try {
+                val outputStream = ByteArrayOutputStream()
+                chartBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
+                val requestJson = JSONObject().apply {
+                    val contents = JSONArray().apply {
+                        val contentObj = JSONObject().apply {
+                            val parts = JSONArray().apply {
+                                put(JSONObject().apply { put("text", prompt) })
+                                put(JSONObject().apply {
+                                    put("inlineData", JSONObject().apply {
+                                        put("mimeType", "image/jpeg")
+                                        put("data", base64Image)
+                                    })
                                 })
-                            })
+                            }
+                            put("parts", parts)
                         }
-                        put("parts", parts)
+                        put(contentObj)
                     }
-                    put(contentObj)
+                    put("contents", contents)
+                    put("generationConfig", JSONObject().apply {
+                        put("temperature", 0.15)
+                        put("topP", 0.85)
+                        put("responseMimeType", "application/json")
+                        put("thinkingConfig", JSONObject().apply {
+                            put("thinkingBudget", 0)
+                        })
+                    })
                 }
-                put("contents", contents)
 
-                // Optional system instruction
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", 0.2)
-                    put("topP", 0.9)
-                })
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder().url(url).post(requestBody).build()
+
+                val response = httpClient.newCall(request).execute()
+                val responseString = response.body?.string()
+
+                if (response.isSuccessful && !responseString.isNullOrBlank()) {
+                    val parsed = parseGeminiResponse(responseString, asset, indicators)
+                    if (parsed != null) return parsed
+                }
+            } catch (_: Exception) {
+                // Try next model or fallback to text
             }
-
-            // Using gemini-3.5-flash as specified in skill guidelines
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
-            val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val responseString = response.body?.string()
-
-            if (!response.isSuccessful || responseString.isNullOrBlank()) {
-                return@withContext generateHeuristicRecommendation(
-                    asset, timeframe, candles, indicators,
-                    note = "Koneksi Gemini bermasalah (${response.code}). Menggunakan analisis kuantitatif lokal."
-                )
-            }
-
-            parseGeminiResponse(responseString, asset, indicators)
-        } catch (e: Exception) {
-            generateHeuristicRecommendation(
-                asset, timeframe, candles, indicators,
-                note = "Gagal memanggil Gemini API: ${e.localizedMessage ?: "Unknown"}. Fallback ke analisis teknikal algoritma."
-            )
         }
+        return null
+    }
+
+    private fun tryCallGeminiText(
+        apiKey: String,
+        prompt: String,
+        asset: MarketAsset,
+        indicators: TechnicalIndicators
+    ): AiAnalysisResult? {
+        val models = listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-flash-latest")
+        for (model in models) {
+            try {
+                val requestJson = JSONObject().apply {
+                    val contents = JSONArray().apply {
+                        val contentObj = JSONObject().apply {
+                            val parts = JSONArray().apply {
+                                put(JSONObject().apply { put("text", prompt) })
+                            }
+                            put("parts", parts)
+                        }
+                        put(contentObj)
+                    }
+                    put("contents", contents)
+                    put("generationConfig", JSONObject().apply {
+                        put("temperature", 0.15)
+                        put("topP", 0.85)
+                        put("responseMimeType", "application/json")
+                        put("thinkingConfig", JSONObject().apply {
+                            put("thinkingBudget", 0)
+                        })
+                    })
+                }
+
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder().url(url).post(requestBody).build()
+
+                val response = httpClient.newCall(request).execute()
+                val responseString = response.body?.string()
+
+                if (response.isSuccessful && !responseString.isNullOrBlank()) {
+                    val parsed = parseGeminiResponse(responseString, asset, indicators)
+                    if (parsed != null) return parsed
+                }
+            } catch (_: Exception) {
+                // Try next model
+            }
+        }
+        return null
     }
 
     private fun buildTechnicalPrompt(
@@ -167,61 +230,75 @@ class GeminiAnalystClient {
         rawJson: String,
         asset: MarketAsset,
         indicators: TechnicalIndicators
-    ): AiAnalysisResult {
-        val root = JSONObject(rawJson)
-        val candidates = root.optJSONArray("candidates")
-        val content = candidates?.optJSONObject(0)?.optJSONObject("content")
-        val parts = content?.optJSONArray("parts")
-        val text = parts?.optJSONObject(0)?.optString("text") ?: ""
+    ): AiAnalysisResult? {
+        return try {
+            val root = JSONObject(rawJson)
+            val candidates = root.optJSONArray("candidates")
+            val content = candidates?.optJSONObject(0)?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val textBuilder = StringBuilder()
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    val partObj = parts.optJSONObject(i)
+                    val t = partObj?.optString("text") ?: ""
+                    if (t.isNotEmpty()) textBuilder.append(t)
+                }
+            }
+            val text = textBuilder.toString()
 
-        // Extract JSON substring if wrapped in markdown code blocks ```json ... ```
-        val cleanedText = text
-            .replace("```json", "")
-            .replace("```", "")
-            .trim()
+            val firstBrace = text.indexOf('{')
+            val lastBrace = text.lastIndexOf('}')
+            val jsonString = if (firstBrace != -1 && lastBrace > firstBrace) {
+                text.substring(firstBrace, lastBrace + 1)
+            } else {
+                text.replace("```json", "").replace("```", "").trim()
+            }
 
-        val json = JSONObject(cleanedText)
-        val actionStr = json.optString("action", "BUY").uppercase(Locale.US)
-        val action = when {
-            actionStr.contains("STRONG BUY") -> SignalAction.STRONG_BUY
-            actionStr.contains("STRONG SELL") -> SignalAction.STRONG_SELL
-            actionStr.contains("BUY") -> SignalAction.BUY
-            actionStr.contains("SELL") -> SignalAction.SELL
-            else -> SignalAction.NEUTRAL
+            val json = JSONObject(jsonString)
+            val actionStr = json.optString("action", "BUY").uppercase(Locale.US)
+            val action = when {
+                actionStr.contains("STRONG BUY") -> SignalAction.STRONG_BUY
+                actionStr.contains("STRONG SELL") -> SignalAction.STRONG_SELL
+                actionStr.contains("BUY") -> SignalAction.BUY
+                actionStr.contains("SELL") -> SignalAction.SELL
+                else -> SignalAction.NEUTRAL
+            }
+
+            val confidence = json.optInt("confidence", 80).coerceIn(10, 99)
+            val trend = json.optString("trend", "BULLISH")
+            val entryZone = json.optString("entryZone", "${asset.currentPrice}")
+            val tp1 = json.optDouble("takeProfit1", asset.currentPrice * 1.015)
+            val tp2 = json.optDouble("takeProfit2", asset.currentPrice * 1.03)
+            val sl = json.optDouble("stopLoss", asset.currentPrice * 0.985)
+            val rr = json.optString("riskRewardRatio", "1 : 2.0")
+            val rsiAnal = json.optString("rsiAnalysis", "Kondisi RSI terkonfirmasi.")
+            val macdAnal = json.optString("macdAnalysis", "Sinyal momentum MACD aktif.")
+            val maAnal = json.optString("maAnalysis", "EMA 9 dan EMA 21 selaras dengan arah tren.")
+            val summary = json.optString("keySummary", "Analisis teknikal visual mengonfirmasi sinyal probabilitas tinggi.")
+            val risk = json.optString("riskWarning", "Gunakan batas risiko maksimal 1-2% modal per transaksi.")
+
+            AiAnalysisResult(
+                action = action,
+                confidence = confidence,
+                trend = trend,
+                entryZone = entryZone,
+                takeProfit1 = tp1,
+                takeProfit2 = tp2,
+                stopLoss = sl,
+                riskRewardRatio = rr,
+                patternsDetected = indicators.detectedPatterns,
+                rsiAnalysis = rsiAnal,
+                macdAnalysis = macdAnal,
+                maAnalysis = maAnal,
+                keySummary = summary,
+                riskWarning = risk,
+                analyzedAt = System.currentTimeMillis(),
+                isRealAi = true,
+                platformSource = "${asset.platform.badgeLabel} (${asset.tvSymbol})"
+            )
+        } catch (_: Exception) {
+            null
         }
-
-        val confidence = json.optInt("confidence", 80).coerceIn(10, 99)
-        val trend = json.optString("trend", "BULLISH")
-        val entryZone = json.optString("entryZone", "${asset.currentPrice}")
-        val tp1 = json.optDouble("takeProfit1", asset.currentPrice * 1.015)
-        val tp2 = json.optDouble("takeProfit2", asset.currentPrice * 1.03)
-        val sl = json.optDouble("stopLoss", asset.currentPrice * 0.985)
-        val rr = json.optString("riskRewardRatio", "1 : 2.0")
-        val rsiAnal = json.optString("rsiAnalysis", "Kondisi RSI terkonfirmasi.")
-        val macdAnal = json.optString("macdAnalysis", "Sinyal momentum MACD aktif.")
-        val maAnal = json.optString("maAnalysis", "EMA 9 dan EMA 21 selaras dengan arah tren.")
-        val summary = json.optString("keySummary", "Analisis teknikal visual mengonfirmasi sinyal probabilitas tinggi.")
-        val risk = json.optString("riskWarning", "Gunakan batas risiko maksimal 1-2% modal per transaksi.")
-
-        return AiAnalysisResult(
-            action = action,
-            confidence = confidence,
-            trend = trend,
-            entryZone = entryZone,
-            takeProfit1 = tp1,
-            takeProfit2 = tp2,
-            stopLoss = sl,
-            riskRewardRatio = rr,
-            patternsDetected = indicators.detectedPatterns,
-            rsiAnalysis = rsiAnal,
-            macdAnalysis = macdAnal,
-            maAnalysis = maAnal,
-            keySummary = summary,
-            riskWarning = risk,
-            analyzedAt = System.currentTimeMillis(),
-            isRealAi = true,
-            platformSource = "${asset.platform.badgeLabel} (${asset.tvSymbol})"
-        )
     }
 
     fun generateHeuristicRecommendation(

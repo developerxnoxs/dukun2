@@ -1,6 +1,13 @@
 package com.example.ui.components.bot
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +39,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
@@ -69,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -78,10 +87,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.calculator.IndicatorCalculator
 import com.example.data.bot.BacktestReport
 import com.example.data.bot.BotStrategyType
 import com.example.data.bot.BotUiState
+import com.example.data.bot.CoinScreenCategory
+import com.example.data.mexc.Mexc24hTicker
+import com.example.data.model.AssetType
 import com.example.data.model.CandleStick
+import com.example.data.model.ExchangePlatform
+import com.example.data.model.MarketAsset
+import com.example.data.model.TechnicalIndicators
+import com.example.ui.components.InteractiveCandlestickChart
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -119,10 +136,18 @@ fun TradingBotDialog(
     onClearHistory: () -> Unit,
     onExecuteGeminiTrader: () -> Unit = {},
     onExecuteInstantBuy: () -> Unit = {},
-    onSaveGeminiKey: (String) -> Unit = {}
+    onSaveGeminiKey: (String) -> Unit = {},
+    onRefreshScreener: () -> Unit = {},
+    onRunAiCoinSelection: (CoinScreenCategory) -> Unit = {},
+    onSelectCoin: (Mexc24hTicker, Double?, Double?) -> Unit = { _, _, _ -> },
+    onSelectScreenerCategory: (CoinScreenCategory) -> Unit = {},
+    asset: MarketAsset? = null,
+    indicators: TechnicalIndicators? = null,
+    refreshCountdown: Int = 5,
+    isRefreshingPrice: Boolean = false
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("🤖 Gemini Bot", "📈 Uji Coba (Backtest)", "⚙️ Akun & MEXC API")
+    val tabs = listOf("🤖 Gemini Bot", "🪙 Koin MEXC", "📈 Uji Coba", "⚙️ Akun & API")
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -247,21 +272,39 @@ fun TradingBotDialog(
                             botState = botState,
                             currentSymbol = currentSymbol,
                             currentPrice = currentPrice,
+                            candles = candles,
+                            asset = asset,
+                            indicators = indicators,
+                            refreshCountdown = refreshCountdown,
+                            isRefreshingPrice = isRefreshingPrice,
                             onStartBot = onStartBot,
                             onStopBot = onStopBot,
                             onToggleSandbox = onToggleSandbox,
                             onExecuteGeminiTrader = onExecuteGeminiTrader,
                             onExecuteInstantBuy = onExecuteInstantBuy,
                             onManualClosePosition = onManualClosePosition,
-                            onResetSandboxBalance = onResetSandboxBalance
+                            onResetSandboxBalance = onResetSandboxBalance,
+                            onOpenScreenerTab = { selectedTab = 1 },
+                            onSelectCoin = onSelectCoin
                         )
-                        1 -> SimpleBacktestTab(
+                        1 -> MexcCoinScreenerTab(
+                            botState = botState,
+                            currentSelectedSymbol = currentSymbol,
+                            onRefreshScreener = onRefreshScreener,
+                            onRunAiSelection = onRunAiCoinSelection,
+                            onSelectCoin = { ticker, tp, sl ->
+                                onSelectCoin(ticker, tp, sl)
+                                selectedTab = 0
+                            },
+                            onSelectCategory = onSelectScreenerCategory
+                        )
+                        2 -> SimpleBacktestTab(
                             currentSymbol = currentSymbol,
                             backtestReport = backtestReport,
                             isBacktesting = isBacktesting,
                             onRunBacktest = onRunBacktest
                         )
-                        2 -> SimpleMexcSettingsTab(
+                        3 -> SimpleMexcSettingsTab(
                             botState = botState,
                             currentSymbol = currentSymbol,
                             onSaveCredentials = onSaveCredentials,
@@ -286,13 +329,20 @@ private fun SimpleGeminiBotTab(
     botState: BotUiState,
     currentSymbol: String,
     currentPrice: Double,
+    candles: List<CandleStick>,
+    asset: MarketAsset?,
+    indicators: TechnicalIndicators?,
+    refreshCountdown: Int,
+    isRefreshingPrice: Boolean,
     onStartBot: () -> Unit,
     onStopBot: () -> Unit,
     onToggleSandbox: (Boolean) -> Unit,
     onExecuteGeminiTrader: () -> Unit,
     onExecuteInstantBuy: () -> Unit,
     onManualClosePosition: () -> Unit,
-    onResetSandboxBalance: () -> Unit
+    onResetSandboxBalance: () -> Unit,
+    onOpenScreenerTab: () -> Unit = {},
+    onSelectCoin: (Mexc24hTicker, Double?, Double?) -> Unit = { _, _, _ -> }
 ) {
     val scrollState = rememberScrollState()
     val position = botState.activePosition
@@ -412,6 +462,630 @@ private fun SimpleGeminiBotTab(
                                 text = "Saldo Nyata Bursa MEXC",
                                 color = if (!botState.isSandbox) Color(0xFFFCA5A5) else TextMuted,
                                 fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1.5. Kartu Target Koin MEXC & Rekomendasi AI Gemini
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("target_coin_selection_card"),
+            colors = CardDefaults.cardColors(containerColor = CardBg),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(BorderColor))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "PASAR / KOIN AKTIF:",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = currentSymbol,
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = BrandCyan.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, BrandCyan.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "MEXC SPOT",
+                                    color = BrandCyan,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = onOpenScreenerTab,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BrandCyan.copy(alpha = 0.5f)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("open_screener_tab_btn")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = BrandCyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Pilih Koin MEXC",
+                                color = BrandCyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                val aiRec = botState.aiRecommendedCoin
+                if (aiRec != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = GeminiPurple.copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GeminiPurple.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = BrandCyan,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Rekomendasi AI: ${aiRec.recommendedSymbol} (${String.format(Locale.US, "%.0f%%", aiRec.confidence * 100)} Akurasi)",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "Target TP: +${aiRec.suggestedTpPct}% • SL: -${aiRec.suggestedSlPct}% • ${aiRec.setupCategory}",
+                                    color = BrandCyan,
+                                    fontSize = 9.sp
+                                )
+                            }
+
+                            if (!currentSymbol.equals(aiRec.recommendedSymbol, ignoreCase = true)) {
+                                Button(
+                                    onClick = {
+                                        val dummy = Mexc24hTicker(aiRec.recommendedSymbol, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                                        onSelectCoin(dummy, aiRec.suggestedTpPct, aiRec.suggestedSlPct)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = BrandCyan),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.testTag("apply_ai_coin_btn")
+                                ) {
+                                    Text("Pakai Koin Ini", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1.6. Kartu Harga Real-Time, Detak Pasar & Status Sinkronisasi
+        val infiniteTransition = rememberInfiniteTransition(label = "bot_pulse")
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse_alpha"
+        )
+        val pulseScale by infiniteTransition.animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse_scale"
+        )
+
+        val displayAsset = remember(asset, currentSymbol, currentPrice, candles) {
+            asset ?: MarketAsset(
+                symbol = currentSymbol,
+                tvSymbol = "MEXC:$currentSymbol",
+                displayName = currentSymbol,
+                name = currentSymbol,
+                type = AssetType.CRYPTO,
+                platform = ExchangePlatform.MEXC,
+                currentPrice = currentPrice,
+                change24h = candles.lastOrNull()?.let { last ->
+                    candles.firstOrNull()?.let { first ->
+                        if (first.open > 0) ((last.close - first.open) / first.open) * 100.0 else 0.0
+                    }
+                } ?: 0.0,
+                high24h = candles.maxOfOrNull { it.high } ?: currentPrice,
+                low24h = candles.minOfOrNull { it.low } ?: currentPrice,
+                volume24h = candles.sumOf { it.volume },
+                decimals = if (currentPrice < 1.0) 4 else 2
+            )
+        }
+
+        val displayIndicators = remember(indicators, candles) {
+            indicators ?: IndicatorCalculator.calculateAllIndicators(candles)
+        }
+
+        val isBull = displayAsset.change24h >= 0
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("bot_realtime_price_card"),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F141C)),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(BorderColor))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .graphicsLayer {
+                                    scaleX = pulseScale
+                                    scaleY = pulseScale
+                                    alpha = pulseAlpha
+                                }
+                                .background(BullGreen, CircleShape)
+                        )
+                        Text(
+                            text = "HARGA PASAR REAL-TIME",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF1E2430),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.FlashOn,
+                                contentDescription = null,
+                                tint = BrandCyan,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = if (isRefreshingPrice) "SYNC..." else "LIVE ${refreshCountdown}s",
+                                color = if (isRefreshingPrice) BrandCyan else BullGreen,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = String.format(Locale.US, "$%,.${displayAsset.decimals}f", currentPrice),
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isBull) BullGreen.copy(alpha = 0.15f) else BearRed.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isBull) BullGreen.copy(alpha = 0.4f) else BearRed.copy(alpha = 0.4f)
+                                )
+                            ) {
+                                Text(
+                                    text = String.format(Locale.US, "%+.2f%%", displayAsset.change24h),
+                                    color = if (isBull) BullGreen else BearRed,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Bursa: MEXC Global • Update langsung per detik",
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(text = "24h High", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "$%,.${displayAsset.decimals}f", displayAsset.high24h),
+                                color = BullGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(text = "24h Low", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "$%,.${displayAsset.decimals}f", displayAsset.low24h),
+                                color = BearRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1.7. Posisi Aktif & Floating PnL Real-Time (Jika ada posisi berjalan)
+        if (position != null) {
+            val isPositionProfit = position.unrealizedPnl >= 0
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("bot_active_position_card"),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isPositionProfit) Color(0xFF042013) else Color(0xFF260D12)
+                ),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(if (isPositionProfit) BullGreen else BearRed)
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isPositionProfit) BullGreen else BearRed)
+                            )
+                            Text(
+                                text = "POSISI AKTIF: ${position.symbol}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        Button(
+                            onClick = onManualClosePosition,
+                            colors = ButtonDefaults.buttonColors(containerColor = BearRed),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("btn_close_position_now")
+                        ) {
+                            Text("Tutup Posisi Sekarang", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(text = "Harga Beli (Entry)", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "$%,.2f", position.entryPrice),
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "Harga Terkini", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "$%,.2f", position.currentPrice),
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(text = "Floating Profit/Loss", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "%s$%,.2f (%+.2f%%)",
+                                    if (position.unrealizedPnl >= 0) "+" else "",
+                                    position.unrealizedPnl,
+                                    position.unrealizedPnlPct
+                                ),
+                                color = if (isPositionProfit) BullGreen else BearRed,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "TP Target: $${String.format(Locale.US, "%,.2f", position.takeProfitPrice)}",
+                            color = BullGreen,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "SL Proteksi: $${String.format(Locale.US, "%,.2f", position.stopLossPrice)}",
+                            color = BearRed,
+                            fontSize = 10.sp
+                        )
+                        if (position.trailingStopPrice > 0) {
+                            Text(
+                                text = "Trailing Stop: $${String.format(Locale.US, "%,.2f", position.trailingStopPrice)}",
+                                color = BrandCyan,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1.8. Grafik Candlestick Interaktif & Indikator Mandat
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("bot_candlestick_chart_card"),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F141C)),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(BorderColor))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.TrendingUp,
+                            contentDescription = null,
+                            tint = BrandCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "GRAFIK CANDLESTICK LIVE ($currentSymbol)",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "${candles.size} Candle Terkini",
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Interactive Candlestick Chart
+                InteractiveCandlestickChart(
+                    asset = displayAsset,
+                    candles = candles,
+                    indicators = displayIndicators,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bot_candlestick_chart")
+                )
+            }
+        }
+
+        // 1.9. Status & Verifikasi Strategi Mandat Berjalan
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("bot_mandate_strategy_card"),
+            colors = CardDefaults.cardColors(
+                containerColor = if (botState.isRunning) Color(0xFF062316) else Color(0xFF161B26)
+            ),
+            border = CardDefaults.outlinedCardBorder().copy(
+                brush = androidx.compose.ui.graphics.SolidColor(if (botState.isRunning) BullGreen.copy(alpha = 0.6f) else BorderColor)
+            )
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = if (botState.isRunning) BullGreen else BrandCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "STRATEGI MANDAT: ${botState.strategy.title}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (botState.isRunning) BullGreen.copy(alpha = 0.2f) else Color(0xFF374151)
+                    ) {
+                        Text(
+                            text = if (botState.isRunning) "MANDAT AKTIF" else "STANDBY",
+                            color = if (botState.isRunning) BullGreen else Color.LightGray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Grid 4 Indikator Mandat
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF1A2230),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                    ) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            Text(text = "Target TP Otomatis", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = "+${String.format(Locale.US, "%.1f", botState.customTpPct)}%",
+                                color = BullGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF1A2230),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                    ) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            Text(text = "Batas Stop Loss (SL)", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = "-${String.format(Locale.US, "%.1f", botState.customSlPct)}%",
+                                color = BearRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF1A2230),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                    ) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            Text(text = "Trailing Stop", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = "+${String.format(Locale.US, "%.1f", botState.customTrailingPct)}%",
+                                color = BrandCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF1A2230),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                    ) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            Text(text = "Break-Even Shield", color = TextMuted, fontSize = 9.sp)
+                            Text(
+                                text = "Aktif (≥1.2%)",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Detail Logika Mandat Berjalan
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF121721),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BullGreen, modifier = Modifier.size(12.dp))
+                            Text(
+                                text = "Evaluasi Mandat Real-Time Terkini:",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = botState.lastSignalReason,
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
+                        if (botState.lastGeminiConfidence > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Tingkat Keyakinan Gemini AI: ${String.format(Locale.US, "%.0f%%", botState.lastGeminiConfidence * 100)}",
+                                color = BrandCyan,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -761,29 +1435,35 @@ private fun SimpleGeminiBotTab(
         // 6. Kartu Rencana Patokan Pemicu Gemini (Zero-API Trigger Blueprint)
         val activePlan = botState.activeBlueprint
         if (activePlan != null && !activePlan.isExpired() && position == null) {
+            val triggerTarget = if (activePlan.triggerMinPrice > 0) activePlan.triggerMinPrice else activePlan.triggerMaxPrice
+            val distancePct = if (currentPrice > 0 && triggerTarget > 0) {
+                ((currentPrice - triggerTarget) / currentPrice) * 100.0
+            } else 0.0
+
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("bot_active_blueprint_card"),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3A)),
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFF38BDF8)))
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = null,
                                 tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Patokan Rencana Gemini Aktif",
+                                text = "Patokan Rencana Gemini (Menunggu Pemicu)",
                                 color = Color(0xFFE0F2FE),
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -793,7 +1473,7 @@ private fun SimpleGeminiBotTab(
                             color = Color(0xFF0284C7)
                         ) {
                             Text(
-                                text = "Hemat API (Berlaku ${activePlan.getRemainingSeconds()}s)",
+                                text = "Hemat API (${activePlan.getRemainingSeconds()}s)",
                                 color = Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
@@ -802,39 +1482,146 @@ private fun SimpleGeminiBotTab(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
+                    // Perbandingan 3 Titik Harga: Analisis Awal, Pasar Terkini, Target Pemicu
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text(text = "Harga Analisis Pertama:", color = TextMuted, fontSize = 10.sp)
-                            Text(
-                                text = "$${String.format(Locale.US, "%,.2f", activePlan.initialAnalysisPrice)}",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF13364A),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(text = "Harga Analisis Pertama", color = TextMuted, fontSize = 9.sp)
+                                Text(
+                                    text = "$${String.format(Locale.US, "%,.2f", activePlan.initialAnalysisPrice)}",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(text = "Saat AI periksa chart", color = TextMuted, fontSize = 8.sp)
+                            }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(text = "Target Pemicu Eksekusi:", color = Color(0xFF7DD3FC), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF13364A),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(text = "Harga Pasar Terkini", color = Color(0xFF93C5FD), fontSize = 9.sp)
+                                Text(
+                                    text = "$${String.format(Locale.US, "%,.2f", currentPrice)}",
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (distancePct > 0) "${String.format(Locale.US, "+%.2f%%", distancePct)} dr pemicu" else "Di area pemicu",
+                                    color = Color(0xFFBAE6FD),
+                                    fontSize = 8.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF0F435C),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(text = "Target Pemicu Masuk", color = Color(0xFF7DD3FC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "$${String.format(Locale.US, "%,.2f", activePlan.triggerMinPrice)}",
+                                    color = BullGreen,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(text = "Jaring Beli Diskon", color = BullGreen, fontSize = 8.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Kotak Penjelasan "Kenapa Belum Ada Eksekusi?"
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF071C27),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E4D68)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
+                                Text(
+                                    text = "Kenapa bot belum mengeksekusi order?",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "$${String.format(Locale.US, "%,.2f", activePlan.triggerMinPrice)} - $${String.format(Locale.US, "%,.2f", activePlan.triggerMaxPrice)}",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                text = "Gemini menilai membeli langsung di harga $${String.format(Locale.US, "%,.2f", activePlan.initialAnalysisPrice)} terlalu berisiko (membeli di resistensi/pucuk). Mandat bot memasang jaring tunggu pada support $${String.format(Locale.US, "%,.2f", activePlan.triggerMinPrice)}. Bot memantau pergerakan harga per detik, dan akan langsung mengeksekusi order seketika harga pasar turun menyentuh titik pemicu.",
+                                color = Color(0xFFBAE6FD),
+                                fontSize = 10.sp,
+                                lineHeight = 15.sp
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "ℹ️ Bot lokal memantau harga real-time tanpa mengirim request API ke Gemini. Seketika target harga pemicu tersentuh, bot langsung mengeksekusi order!",
-                        color = Color(0xFFBAE6FD),
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Tombol Aksi Alternatif
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onExecuteInstantBuy,
+                            colors = ButtonDefaults.buttonColors(containerColor = BullGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_instant_market_buy_blueprint")
+                        ) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Beli Sekarang (Pasar)",
+                                color = Color.Black,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onExecuteGeminiTrader,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_reanalyze_blueprint")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Analisis Ulang AI",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }

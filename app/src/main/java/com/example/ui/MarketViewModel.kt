@@ -13,10 +13,13 @@ import com.example.data.calculator.IndicatorCalculator
 import com.example.data.fetcher.MarketDataFetcher
 import com.example.data.gemini.ChartImageRenderer
 import com.example.data.gemini.GeminiAnalystClient
+import com.example.data.mexc.Mexc24hTicker
 import com.example.data.mexc.MexcApiClient
 import com.example.data.model.AlertType
 import com.example.data.model.AiAnalysisResult
+import com.example.data.model.AssetType
 import com.example.data.model.CandleStick
+import com.example.data.model.ExchangePlatform
 import com.example.data.model.LiveSignal
 import com.example.data.model.MarketAsset
 import com.example.data.model.PriceAlert
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -168,6 +172,84 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         loadMarketData()
     }
 
+    /**
+     * Select a coin from the MEXC Screener / AI Selector:
+     * - Configures the autonomous TradingBotManager to focus on this symbol
+     * - Updates the active chart, indicators, and live market feed to track this coin
+     */
+    fun selectMexcCoin(ticker: Mexc24hTicker, customTpPct: Double? = null, customSlPct: Double? = null) {
+        tradingBotManager.selectCoinForTrading(ticker.symbol, customTpPct, customSlPct)
+        val existing = _uiState.value.assets.firstOrNull { it.symbol.equals(ticker.symbol, ignoreCase = true) }
+        if (existing != null) {
+            selectAsset(existing)
+        } else {
+            val mexcAsset = MarketAsset(
+                symbol = ticker.symbol,
+                tvSymbol = "MEXC:${ticker.symbol}",
+                displayName = "${ticker.baseAsset}/USDT",
+                name = "${ticker.baseAsset} Token",
+                type = AssetType.CRYPTO,
+                platform = ExchangePlatform.MEXC,
+                currentPrice = if (ticker.lastPrice > 0) ticker.lastPrice else 1.0,
+                change24h = ticker.priceChangePercent,
+                high24h = ticker.highPrice,
+                low24h = ticker.lowPrice,
+                volume24h = ticker.volume,
+                decimals = if (ticker.lastPrice < 0.01) 6 else if (ticker.lastPrice < 1.0) 4 else 2
+            )
+            _uiState.update {
+                it.copy(
+                    assets = listOf(mexcAsset) + it.assets,
+                    selectedAsset = mexcAsset,
+                    aiAnalysisResult = null,
+                    latestChartBitmap = null
+                )
+            }
+            loadMarketData()
+        }
+    }
+
+    fun selectMexcCoinBySymbol(symbol: String) {
+        val cleanSym = symbol.uppercase(Locale.US)
+        val existing = _uiState.value.assets.firstOrNull { it.symbol.equals(cleanSym, ignoreCase = true) }
+        if (existing != null) {
+            tradingBotManager.selectCoinForTrading(cleanSym)
+            selectAsset(existing)
+        } else {
+            viewModelScope.launch {
+                val res = MexcApiClient().getSingle24hTicker(cleanSym)
+                if (res.isSuccess) {
+                    selectMexcCoin(res.getOrThrow())
+                } else {
+                    tradingBotManager.selectCoinForTrading(cleanSym)
+                    val base = cleanSym.removeSuffix("USDT")
+                    val mexcAsset = MarketAsset(
+                        symbol = cleanSym,
+                        tvSymbol = "MEXC:$cleanSym",
+                        displayName = "$base/USDT",
+                        name = "$base Token",
+                        type = AssetType.CRYPTO,
+                        platform = ExchangePlatform.MEXC,
+                        currentPrice = _uiState.value.selectedAsset.currentPrice,
+                        change24h = 0.0,
+                        high24h = 0.0,
+                        low24h = 0.0,
+                        volume24h = 0.0
+                    )
+                    _uiState.update {
+                        it.copy(
+                            assets = listOf(mexcAsset) + it.assets,
+                            selectedAsset = mexcAsset,
+                            aiAnalysisResult = null,
+                            latestChartBitmap = null
+                        )
+                    }
+                    loadMarketData()
+                }
+            }
+        }
+    }
+
     fun selectTimeframe(timeframe: Timeframe) {
         if (_uiState.value.selectedTimeframe == timeframe) return
         _uiState.update { it.copy(selectedTimeframe = timeframe, aiAnalysisResult = null, latestChartBitmap = null) }
@@ -252,13 +334,15 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                 indicators = state.indicators
             )
 
-            // 2. Call Gemini API Multimodal Vision
+            // 2. Call Gemini API Multimodal Vision with custom API Key fallback
+            val customApiKey = botState.value.customGeminiApiKey
             val result = geminiClient.analyzeChartWithGemini(
                 asset = state.selectedAsset,
                 timeframe = state.selectedTimeframe,
                 candles = candles,
                 indicators = state.indicators,
-                chartBitmap = chartBitmap
+                chartBitmap = chartBitmap,
+                customApiKey = customApiKey
             )
 
             // 3. Post live signal notification if it's an actionable signal
