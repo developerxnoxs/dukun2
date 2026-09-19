@@ -87,6 +87,7 @@ import com.example.ui.MarketViewModel
 import com.example.ui.components.AiAnalysisCard
 import com.example.ui.components.AlertsDialog
 import com.example.ui.components.InteractiveCandlestickChart
+import com.example.ui.components.LiveIndicatorsPanel
 import com.example.ui.components.SymbolSearchDialog
 import com.example.ui.components.WatchlistBar
 import com.example.ui.components.bot.TradingBotDialog
@@ -213,34 +214,16 @@ fun MainScreen(viewModel: MarketViewModel) {
                                     fontWeight = FontWeight.Black
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = SurfaceCard,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .graphicsLayer {
-                                                    scaleX = pulseScale
-                                                    scaleY = pulseScale
-                                                    alpha = pulseAlpha
-                                                }
-                                                .background(BullGreen, CircleShape)
-                                        )
-                                        Text(
-                                            text = if (uiState.isRefreshingPrice) "SYNC..." else "LIVE ${uiState.refreshCountdown}s",
-                                            color = if (uiState.isRefreshingPrice) Ema9Cyan else BullGreen,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .graphicsLayer {
+                                            scaleX = pulseScale
+                                            scaleY = pulseScale
+                                            alpha = pulseAlpha
+                                        }
+                                        .background(BullGreen, CircleShape)
+                                )
                             }
                             Text(
                                 text = "Crypto, Forex & Komoditas Technical Analyst",
@@ -296,15 +279,7 @@ fun MainScreen(viewModel: MarketViewModel) {
                         onClick = { viewModel.triggerImmediateRefresh() },
                         modifier = Modifier.testTag("top_refresh_button")
                     ) {
-                        if (uiState.isRefreshingPrice) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = Ema9Cyan
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary)
-                        }
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary)
                     }
 
                     // Alerts and Signals Trigger Bell
@@ -636,6 +611,12 @@ fun MainScreen(viewModel: MarketViewModel) {
             InteractiveCandlestickChart(
                 asset = uiState.selectedAsset,
                 candles = uiState.candles,
+                indicators = uiState.indicators
+            )
+
+            // Real-Time Live Technical Indicators Panel (1s Real-Time Pulse)
+            LiveIndicatorsPanel(
+                asset = uiState.selectedAsset,
                 indicators = uiState.indicators
             )
 

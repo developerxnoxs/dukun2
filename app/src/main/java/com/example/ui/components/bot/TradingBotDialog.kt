@@ -58,6 +58,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -79,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -99,6 +101,7 @@ import com.example.data.model.ExchangePlatform
 import com.example.data.model.MarketAsset
 import com.example.data.model.TechnicalIndicators
 import com.example.ui.components.InteractiveCandlestickChart
+import com.example.ui.components.LiveIndicatorsPanel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -675,30 +678,16 @@ private fun SimpleGeminiBotTab(
                         )
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF1E2430),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.FlashOn,
-                                contentDescription = null,
-                                tint = BrandCyan,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Text(
-                                text = if (isRefreshingPrice) "SYNC..." else "LIVE ${refreshCountdown}s",
-                                color = if (isRefreshingPrice) BrandCyan else BullGreen,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .graphicsLayer {
+                                scaleX = pulseScale
+                                scaleY = pulseScale
+                                alpha = pulseAlpha
+                            }
+                            .background(BullGreen, CircleShape)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -903,7 +892,7 @@ private fun SimpleGeminiBotTab(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "GRAFIK CANDLESTICK LIVE ($currentSymbol)",
+                            text = "GRAFIK CANDLESTICK ($currentSymbol)",
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -927,165 +916,417 @@ private fun SimpleGeminiBotTab(
                         .fillMaxWidth()
                         .testTag("bot_candlestick_chart")
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Live Real-Time Technical Indicators Panel (1s Pulse)
+                LiveIndicatorsPanel(
+                    asset = displayAsset,
+                    indicators = displayIndicators,
+                    initialExpanded = false
+                )
             }
         }
 
-        // 1.9. Status & Verifikasi Strategi Mandat Berjalan
+        // 1.9. Status & Verifikasi Strategi Mandat Berjalan (QUANT DASHBOARD GRADE)
+        val mandatePulseTransition = rememberInfiniteTransition(label = "pulse_mandate")
+        val mandatePulseAlpha by mandatePulseTransition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(600, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse_mandate_alpha"
+        )
+
+        val tpPrice = currentPrice * (1.0 + (botState.customTpPct / 100.0))
+        val slPrice = currentPrice * (1.0 - (botState.customSlPct / 100.0))
+        val rrRatio = if (botState.customSlPct > 0) String.format(Locale.US, "1 : %.1f", botState.customTpPct / botState.customSlPct) else "1 : 2.0"
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("bot_mandate_strategy_card"),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (botState.isRunning) Color(0xFF062316) else Color(0xFF161B26)
+                containerColor = if (botState.isRunning) Color(0xFF091422) else Color(0xFF0F1722)
             ),
-            border = CardDefaults.outlinedCardBorder().copy(
-                brush = androidx.compose.ui.graphics.SolidColor(if (botState.isRunning) BullGreen.copy(alpha = 0.6f) else BorderColor)
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (botState.isRunning) BullGreen.copy(alpha = 0.55f) else BorderColor
             )
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Header Mandat
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
-                            tint = if (botState.isRunning) BullGreen else BrandCyan,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "STRATEGI MANDAT: ${botState.strategy.title}",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = if (botState.isRunning) BullGreen.copy(alpha = 0.2f) else Color(0xFF374151)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = if (botState.isRunning) "MANDAT AKTIF" else "STANDBY",
-                            color = if (botState.isRunning) BullGreen else Color.LightGray,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(
+                                    if (botState.isRunning) BullGreen.copy(alpha = 0.15f) else BrandCyan.copy(alpha = 0.12f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = if (botState.isRunning) BullGreen else BrandCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Grid 4 Indikator Mandat
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1A2230),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
-                    ) {
-                        Column(modifier = Modifier.padding(6.dp)) {
-                            Text(text = "Target TP Otomatis", color = TextMuted, fontSize = 9.sp)
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "MANDAT STRATEGI BOT",
+                                    color = TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF1E293B)
+                                ) {
+                                    Text(
+                                        text = "1s REALTIME",
+                                        color = BrandCyan,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Black,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = "+${String.format(Locale.US, "%.1f", botState.customTpPct)}%",
-                                color = BullGreen,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                text = botState.strategy.title,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
 
+                    // Status Pill
                     Surface(
-                        modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1A2230),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
+                        color = if (botState.isRunning) BullGreen.copy(alpha = 0.18f) else Color(0xFF1F2937),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (botState.isRunning) BullGreen.copy(alpha = 0.5f) else Color(0xFF374151)
+                        )
                     ) {
-                        Column(modifier = Modifier.padding(6.dp)) {
-                            Text(text = "Batas Stop Loss (SL)", color = TextMuted, fontSize = 9.sp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            if (botState.isRunning) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .graphicsLayer { alpha = mandatePulseAlpha }
+                                        .background(BullGreen, CircleShape)
+                                )
+                            }
                             Text(
-                                text = "-${String.format(Locale.US, "%.1f", botState.customSlPct)}%",
-                                color = BearRed,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1A2230),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
-                    ) {
-                        Column(modifier = Modifier.padding(6.dp)) {
-                            Text(text = "Trailing Stop", color = TextMuted, fontSize = 9.sp)
-                            Text(
-                                text = "+${String.format(Locale.US, "%.1f", botState.customTrailingPct)}%",
-                                color = BrandCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1A2230),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor)
-                    ) {
-                        Column(modifier = Modifier.padding(6.dp)) {
-                            Text(text = "Break-Even Shield", color = TextMuted, fontSize = 9.sp)
-                            Text(
-                                text = "Aktif (≥1.2%)",
-                                color = Color(0xFFFBBF24),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                text = if (botState.isRunning) "MANDAT AKTIF" else "STANDBY",
+                                color = if (botState.isRunning) BullGreen else Color.LightGray,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Detail Logika Mandat Berjalan
+                // Matriks 2x2 Parameter Mandat Strategi (Rapi, Luas & Informatif)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Baris 1: Take Profit & Stop Loss
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // TP Card
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF13202E),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BullGreen.copy(alpha = 0.3f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "TARGET PROFIT (TP)", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = BullGreen.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "R:R $rrRatio",
+                                            color = BullGreen,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "+${String.format(Locale.US, "%.1f", botState.customTpPct)}%",
+                                    color = BullGreen,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Target: $${String.format(Locale.US, "%,.2f", tpPrice)}",
+                                    color = Color(0xFFA7F3D0),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        // SL Card
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF13202E),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BearRed.copy(alpha = 0.3f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "STOP LOSS (SL)", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = BearRed.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "PROTEKSI",
+                                            color = BearRed,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "-${String.format(Locale.US, "%.1f", botState.customSlPct)}%",
+                                    color = BearRed,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Batas: $${String.format(Locale.US, "%,.2f", slPrice)}",
+                                    color = Color(0xFFFECDD3),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    // Baris 2: Trailing Stop & Break-Even Shield
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Trailing Stop
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF13202E),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BrandCyan.copy(alpha = 0.25f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "TRAILING STOP", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = BrandCyan.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "DINAMIS",
+                                            color = BrandCyan,
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "+${String.format(Locale.US, "%.1f", botState.customTrailingPct)}%",
+                                    color = BrandCyan,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Kunci cuan otomatis saat tren naik",
+                                    color = Color(0xFFBAE6FD),
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+
+                        // Break-Even Shield
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF13202E),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFBBF24).copy(alpha = 0.25f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "BREAK-EVEN SHIELD", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        shape = RoundedCornerShape(3.dp),
+                                        color = Color(0xFFFBBF24).copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "ZERO-LOSS",
+                                            color = Color(0xFFFBBF24),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Aktif (≥1.2%)",
+                                    color = Color(0xFFFBBF24),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "SL digeser ke modal beli saat cuan",
+                                    color = Color(0xFFFEF3C7),
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Detail Logika Mandat Berjalan & Telemetri
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF121721),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderColor),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF0C1322),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BullGreen, modifier = Modifier.size(12.dp))
-                            Text(
-                                text = "Evaluasi Mandat Real-Time Terkini:",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BullGreen, modifier = Modifier.size(13.dp))
+                                Text(
+                                    text = "Telemetri Mandat Per Detik:",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            // Confluence Badges
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Surface(shape = RoundedCornerShape(3.dp), color = Color(0xFF13202E)) {
+                                    Text(
+                                        text = "TICK 1S: ON",
+                                        color = BullGreen,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                                Surface(shape = RoundedCornerShape(3.dp), color = Color(0xFF13202E)) {
+                                    Text(
+                                        text = "SLIPPAGE: 0.1%",
+                                        color = BrandCyan,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
                         }
-                        Spacer(modifier = Modifier.height(3.dp))
+
+                        Spacer(modifier = Modifier.height(5.dp))
                         Text(
                             text = botState.lastSignalReason,
-                            color = TextMuted,
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
                         )
+
                         if (botState.lastGeminiConfidence > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Keyakinan Gemini AI:",
+                                    color = TextMuted,
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    text = "${(botState.lastGeminiConfidence * 100).toInt()}%",
+                                    color = BrandCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Tingkat Keyakinan Gemini AI: ${String.format(Locale.US, "%.0f%%", botState.lastGeminiConfidence * 100)}",
+                            LinearProgressIndicator(
+                                progress = { botState.lastGeminiConfidence.toFloat() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
                                 color = BrandCyan,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold
+                                trackColor = Color(0xFF1E293B)
                             )
                         }
                     }
@@ -1444,8 +1685,9 @@ private fun SimpleGeminiBotTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("bot_active_blueprint_card"),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0C2A3A)),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFF38BDF8)))
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF091B28)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.6f))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(

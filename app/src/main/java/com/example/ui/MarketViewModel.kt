@@ -56,8 +56,8 @@ data class MarketUiState(
     val searchResults: List<com.example.data.model.SearchResultItem> = emptyList(),
     val isSearching: Boolean = false,
     val isAutoRefreshEnabled: Boolean = true,
-    val autoRefreshIntervalSeconds: Int = 5,
-    val refreshCountdown: Int = 5,
+    val autoRefreshIntervalSeconds: Int = 1,
+    val refreshCountdown: Int = 1,
     val isRefreshingPrice: Boolean = false,
     val lastRefreshedTimeMillis: Long = System.currentTimeMillis()
 )
@@ -442,7 +442,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setAutoRefreshInterval(seconds: Int) {
-        val validSec = seconds.coerceIn(3, 60)
+        val validSec = seconds.coerceIn(1, 60)
         _uiState.update { 
             it.copy(
                 autoRefreshIntervalSeconds = validSec,
@@ -475,7 +475,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             val currentCandles = state.candles
 
             // If initial candles are missing or periodic full sync is needed, fetch fresh candles in background
-            if (currentCandles.isEmpty() || fullCandleSync || refreshCycleCounter % 4 == 0) {
+            if (currentCandles.isEmpty() || fullCandleSync || refreshCycleCounter % 20 == 0) {
                 try {
                     val freshCandles = fetcher.fetchCandles(asset, tf, limit = 85)
                     if (freshCandles.isNotEmpty()) {
@@ -571,7 +571,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // Periodically refresh ratings from TradingView scanner
-            if (refreshCycleCounter % 3 == 0) {
+            if (refreshCycleCounter % 15 == 0) {
                 try {
                     val ratings = fetcher.fetchTradingViewScanner(_uiState.value.assets)
                     if (ratings.isNotEmpty()) {
@@ -617,7 +617,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update { it.copy(refreshCountdown = interval) }
                     refreshCycleCounter++
                     launch {
-                        performAutoRefresh(fullCandleSync = (refreshCycleCounter % 4 == 0))
+                        performAutoRefresh(fullCandleSync = (refreshCycleCounter % 20 == 0))
                     }
                 }
             }

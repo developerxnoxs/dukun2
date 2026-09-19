@@ -153,11 +153,7 @@ fun MexcCoinScreenerTab(
                         .border(1.dp, BorderColor, RoundedCornerShape(10.dp))
                         .testTag("refresh_screener_btn")
                 ) {
-                    if (botState.isScanningCoins) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = BrandCyan, strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = BrandCyan)
-                    }
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = BrandCyan)
                 }
             }
         }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -324,20 +325,28 @@ fun InteractiveCandlestickChart(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = if (isInspecting) WarningGold.copy(alpha = 0.15f) else BullGreen.copy(alpha = 0.15f),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isInspecting) WarningGold.copy(alpha = 0.4f) else BullGreen.copy(alpha = 0.4f)
-                                )
-                            ) {
-                                Text(
-                                    text = if (isInspecting) "TINJAU" else "LIVE",
-                                    color = if (isInspecting) WarningGold else BullGreen,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            if (isInspecting) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = WarningGold.copy(alpha = 0.15f),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        WarningGold.copy(alpha = 0.4f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = "TINJAU",
+                                        color = WarningGold,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .background(BullGreen, CircleShape)
                                 )
                             }
                             Text(
@@ -1061,14 +1070,10 @@ private fun FullScreenCandlestickChartDialog(
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "LIVE",
-                        color = BullGreen,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                    Box(
                         modifier = Modifier
-                            .background(BullGreen.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .size(8.dp)
+                            .background(BullGreen, CircleShape)
                     )
                 }
 
